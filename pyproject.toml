@@ -1,0 +1,48 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "prowl-bench"
+version = "0.1.0"
+description = "Open-source benchmark runner for the Prowl Agent Discovery Network"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+authors = [{ name = "Prowl", email = "dev@prowl.world" }]
+keywords = ["benchmark", "api", "agent", "llm", "prowl"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Testing",
+]
+dependencies = [
+    "httpx>=0.27",
+    "typer>=0.12",
+    "rich>=13",
+    "pydantic>=2",
+    "pydantic-settings>=2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-asyncio", "ruff"]
+
+[project.scripts]
+prowl-bench = "prowl_bench.cli:app"
+
+[project.urls]
+Homepage = "https://prowl.world"
+Repository = "https://github.com/opcastil11/prowl-bench"
+Documentation = "https://prowl.world/docs"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/prowl_bench"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
