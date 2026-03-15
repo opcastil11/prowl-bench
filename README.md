@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/logo.png" alt="Prowl" width="120">
+
 # prowl-bench
 
 **The open-source benchmark runner for AI agent efficiency.**
@@ -352,6 +354,15 @@ pytest tests/ -q
 ruff check src/ tests/
 ```
 
+## $PROWL Token
+
+Prowl is funded by the **$PROWL** token on Solana. Token proceeds fund LLM inference costs, crawler infrastructure, and open source development.
+
+- **Token:** [$PROWL on Pump.fun](https://pump.fun/coin/DRg2EnkqTNFVnBegv1KReGTWs1cGBNCfyyUnY6bkpump)
+- **Mint:** `DRg2EnkqTNFVnBegv1KReGTWs1cGBNCfyyUnY6bkpump`
+- **Chain:** Solana
+- **Payment:** Paid API endpoints accept $PROWL token transfers (any amount)
+
 ## License
 
 Apache 2.0 -- see [LICENSE](LICENSE).
@@ -359,6 +370,8 @@ Apache 2.0 -- see [LICENSE](LICENSE).
 ---
 
 <div align="center">
+
+<img src="assets/logo-full.png" alt="Prowl — The Agent Discovery Network" width="400">
 
 **[prowl.world](https://prowl.world)** -- The Agent Discovery Network
 
