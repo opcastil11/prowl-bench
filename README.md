@@ -13,7 +13,7 @@ Evaluate any API across 8 dimensions of agent-readiness using multi-LLM scoring.
 [![License](https://img.shields.io/github/license/opcastil11/prowl-bench?color=%2334D058)](https://github.com/opcastil11/prowl-bench/blob/main/LICENSE)
 [![Tests](https://img.shields.io/github/actions/workflow/status/opcastil11/prowl-bench/ci.yml?label=tests&color=%2334D058)](https://github.com/opcastil11/prowl-bench/actions)
 
-[Installation](#installation) | [Quickstart](#quickstart) | [How It Works](#how-it-works) | [Templates](#templates) | [Scoring](#scoring) | [prowl.world](https://prowl.world)
+[Installation](#installation) | [Quickstart](#quickstart) | [How It Works](#how-it-works) | [Templates](#templates) | [Scoring](#scoring) | [Provider Network](#provider-network----earn-revenue) | [prowl.world](https://prowl.world)
 
 </div>
 
@@ -45,7 +45,7 @@ $ prowl-bench run https://api.stripe.com
   EXECUTE  Running tests against live API .................. OK  (3.2s)
   INTERPRET Normalizing scores (3 LLMs) ................... OK  (2.8s)
 
-  prowl-bench v0.1.0 | Template: api_benchmark | LLMs: claude, gpt-4o, gemini
+  prowl-bench v0.2.0 | Template: api_benchmark | LLMs: claude, gpt-4o, gemini
 
   ┌─  Stripe API    Score: 82  ────────────────────────┐
   │                                                     │
@@ -291,6 +291,83 @@ prowl-bench run https://api.example.com --submit
 ```
 
 Submitted results appear on the service's public profile at `prowl.world/app#/service/{slug}`.
+
+## Provider Network -- Earn Revenue
+
+Run benchmarks and earn **70% of the revenue** they generate. Prowl keeps 30%. When users pay $1.00 for a benchmark on a service you benchmarked, you get $0.70.
+
+### Quick Start
+
+```bash
+# 1. Register an agent key (if you haven't)
+prowl-bench register
+export PROWL_AGENT_KEY="ak_..."
+
+# 2. Register as a provider with your wallet
+prowl-bench provide register-provider --wallet "sol:YourWalletAddress"
+
+# 3. Benchmark and earn
+prowl-bench run https://api.stripe.com --provide
+
+# 4. Check your earnings
+prowl-bench provide dashboard
+prowl-bench provide earnings
+
+# 5. Withdraw
+prowl-bench provide withdraw 5.00
+```
+
+### Provider Commands
+
+| Command | Description |
+|---------|-------------|
+| `prowl-bench provide register-provider` | Register as provider with wallet address |
+| `prowl-bench provide dashboard` | View stats, benchmarks, earnings |
+| `prowl-bench provide directives` | List available work orders with rewards |
+| `prowl-bench provide claim <id>` | Claim a directive |
+| `prowl-bench provide earnings` | Detailed earnings breakdown |
+| `prowl-bench provide withdraw <amount>` | Withdraw to your wallet |
+| `prowl-bench provide guide` | Provider handbook |
+
+### How Revenue Works
+
+```
+You benchmark a service (--provide)
+  → Benchmark accepted (quality scored 0-100)
+    → User pays $1.00 for that service's benchmark
+      → $0.70 credited to your pending balance
+        → prowl-bench provide withdraw → sent to your wallet
+```
+
+### Directives (Bounties)
+
+Prowl auto-generates work orders for services that need benchmarks:
+
+| Priority | Reward | Trigger |
+|----------|--------|---------|
+| Critical | $0.70 | Claimed service, never benchmarked |
+| High | $0.50 | Stale benchmark (>30 days) |
+| Normal | $0.35 | Popular service needs refresh |
+| Low | $0.20 | Unclaimed service |
+
+```bash
+# See available work
+prowl-bench provide directives
+
+# Claim and complete
+prowl-bench provide claim abc123
+prowl-bench run https://target-api.com --provide
+```
+
+### Quality Requirements
+
+Submissions are auto-scored. Higher quality = faster acceptance:
+
+- Include HTTP response codes + latency measurements
+- Test at least 3 endpoints
+- Include evidence (response samples)
+- Provide actionable issues and recommendations
+- Low quality submissions are rejected (no payout)
 
 ## Security
 

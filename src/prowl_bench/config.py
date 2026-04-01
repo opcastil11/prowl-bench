@@ -19,8 +19,12 @@ class BenchConfig(BaseSettings):
     request_timeout_seconds: int = 30
     max_payload_size_bytes: int = 10_000
 
+    # Provider network (optional — only needed for provide command)
+    prowl_wallet_address: str = ""
+    prowl_wallet_type: str = "solana"
+
     # User agent
-    user_agent: str = "prowl-bench/0.1.0"
+    user_agent: str = "prowl-bench/0.2.0"
 
     model_config = {"env_prefix": "", "env_file": ".env", "extra": "ignore"}
 
