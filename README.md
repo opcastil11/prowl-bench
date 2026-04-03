@@ -306,24 +306,71 @@ export PROWL_AGENT_KEY="ak_..."
 # 2. Register as a provider with your wallet
 prowl-bench provide register-provider --wallet "sol:YourWalletAddress"
 
-# 3. Benchmark and earn
+# 3. Start the bot — it auto-claims directives, benchmarks, and submits
+prowl-bench bot start
+```
+
+That's it. The bot polls Prowl for available work, claims directives, runs the full benchmark pipeline, and submits results automatically.
+
+### Autonomous Bot
+
+The bot is a long-running daemon that earns revenue while you sleep:
+
+```bash
+# Start with defaults (poll every 60s, 1 benchmark at a time)
+prowl-bench bot start
+
+# Faster polling, more concurrent work
+prowl-bench bot start --poll-interval 30 --max-workers 3
+
+# Check your status
+prowl-bench bot status
+```
+
+**How the bot works:**
+
+1. Polls Prowl for open directives (benchmark work orders)
+2. Claims the highest-priority directive available
+3. Runs the full 4-phase benchmark pipeline (ANALYZE, PLAN, EXECUTE, INTERPRET)
+4. Submits results to Prowl
+5. Repeats
+
+If a benchmark fails, the bot releases the directive back to the queue for others.
+
+### Manual Mode
+
+You can also run benchmarks manually instead of using the bot:
+
+```bash
+# Benchmark any URL and submit as provider
 prowl-bench run https://api.stripe.com --provide
 
-# 4. Check your earnings
+# Check available work orders
+prowl-bench provide directives
+
+# Claim specific work
+prowl-bench provide claim abc123
+prowl-bench run https://target-api.com --provide
+
+# Check earnings
 prowl-bench provide dashboard
 prowl-bench provide earnings
 
-# 5. Withdraw
+# Withdraw
 prowl-bench provide withdraw 5.00
 ```
 
-### Provider Commands
+### All Commands
 
 | Command | Description |
 |---------|-------------|
+| **Bot** | |
+| `prowl-bench bot start` | Start autonomous provider bot |
+| `prowl-bench bot status` | Check provider status + available work |
+| **Provider** | |
 | `prowl-bench provide register-provider` | Register as provider with wallet address |
 | `prowl-bench provide dashboard` | View stats, benchmarks, earnings |
-| `prowl-bench provide directives` | List available work orders with rewards |
+| `prowl-bench provide directives` | List available work orders |
 | `prowl-bench provide claim <id>` | Claim a directive |
 | `prowl-bench provide earnings` | Detailed earnings breakdown |
 | `prowl-bench provide withdraw <amount>` | Withdraw to your wallet |
@@ -332,32 +379,26 @@ prowl-bench provide withdraw 5.00
 ### How Revenue Works
 
 ```
-You benchmark a service (--provide)
-  → Benchmark accepted (quality scored 0-100)
-    → User pays $1.00 for that service's benchmark
-      → $0.70 credited to your pending balance
-        → prowl-bench provide withdraw → sent to your wallet
+Bot claims directive for a service
+  → Runs full benchmark pipeline
+    → Submits results (quality scored 0-100)
+      → Vendor pays $1.00 for benchmark on that service
+        → $0.70 credited to your pending balance
+          → prowl-bench provide withdraw → sent to your wallet
 ```
+
+Unclaimed services earn $0.00 upfront but you become the designated provider. When a vendor eventually pays, the benchmark is routed to you first.
 
 ### Directives (Bounties)
 
-Prowl auto-generates work orders for services that need benchmarks:
+Prowl auto-generates work orders every hour for services that need benchmarks:
 
 | Priority | Reward | Trigger |
 |----------|--------|---------|
-| Critical | $0.70 | Claimed service, never benchmarked |
+| Critical | $0.70 | Claimed service, never benchmarked (vendor waiting) |
 | High | $0.50 | Stale benchmark (>30 days) |
 | Normal | $0.35 | Popular service needs refresh |
-| Low | $0.20 | Unclaimed service |
-
-```bash
-# See available work
-prowl-bench provide directives
-
-# Claim and complete
-prowl-bench provide claim abc123
-prowl-bench run https://target-api.com --provide
-```
+| Low | catalog | Unclaimed service (earns retroactively when vendor pays) |
 
 ### Quality Requirements
 
@@ -383,7 +424,8 @@ prowl-bench sandboxes all outbound requests:
 
 ```
 src/prowl_bench/
-├── cli.py              # Typer CLI (run, templates, register)
+├── cli.py              # Typer CLI (run, templates, register, provide, bot)
+├── bot.py              # Autonomous provider bot daemon
 ├── config.py           # Settings from env vars
 ├── core/
 │   ├── pipeline.py     # 4-phase benchmark pipeline
@@ -402,7 +444,8 @@ src/prowl_bench/
 │   ├── payload_validator.py  # Size + content validation
 │   └── prompt_sanitizer.py   # Injection protection
 ├── submission/
-│   └── client.py       # Submit results to prowl.world
+│   ├── client.py       # Submit results to prowl.world
+│   └── provider.py     # Provider network API client
 └── templates/
     ├── base.py              # Base template class
     ├── api_benchmark.py     # REST API benchmark

@@ -16,7 +16,9 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 provide_app = typer.Typer(help="Provider network — benchmark services and earn revenue.")
+bot_app = typer.Typer(help="Autonomous provider bot — auto-claim, benchmark, and submit directives.")
 app.add_typer(provide_app, name="provide")
+app.add_typer(bot_app, name="bot")
 
 console = Console()
 
@@ -401,6 +403,61 @@ async def _provide_guide():
             console.print()
         else:
             console.print(f"\n[red]Failed to fetch guide: {resp.status_code}[/red]")
+
+
+# ── Bot subcommands ──────────────────────────────────────────────────
+
+
+@bot_app.command("start")
+def bot_start(
+    poll_interval: int = typer.Option(60, "--poll-interval", "-i", help="Seconds between polls"),
+    max_workers: int = typer.Option(1, "--max-workers", "-w", help="Max concurrent benchmarks per cycle"),
+):
+    """Start the autonomous provider bot.
+
+    The bot polls Prowl for benchmark directives, claims them, runs the full
+    benchmark pipeline, and submits results. Earn revenue when vendors pay
+    for benchmarks on services you've covered.
+
+    Requires PROWL_AGENT_KEY and provider registration.
+
+    Example:
+        prowl-bench bot start
+        prowl-bench bot start --poll-interval 90 --max-workers 3
+    """
+    from prowl_bench.config import get_config
+    cfg = get_config()
+    if not cfg.prowl_agent_key:
+        console.print("[red]PROWL_AGENT_KEY not set. Run: prowl-bench register[/red]")
+        raise typer.Exit(1)
+
+    from prowl_bench.bot import run_bot
+    asyncio.run(run_bot(poll_interval=poll_interval, max_workers=max_workers))
+
+
+@bot_app.command("status")
+def bot_status():
+    """Check provider status and available work."""
+    asyncio.run(_bot_status())
+
+
+async def _bot_status():
+    from prowl_bench.submission.provider import get_dashboard, get_directives
+    try:
+        dashboard = await get_dashboard()
+        claimed = await get_directives(status="claimed")
+        open_dirs = await get_directives(status="open")
+
+        console.print(f"\n[bold]Bot Status[/bold]\n")
+        console.print(f"  Provider:       {dashboard['status']}")
+        console.print(f"  Benchmarks:     {dashboard['total_benchmarks']}")
+        console.print(f"  Earned:         ${dashboard['total_earned_usd']:.2f}")
+        console.print(f"  Pending payout: ${dashboard['pending_payout_usd']:.2f}")
+        console.print(f"  Claimed work:   {len(claimed)}")
+        console.print(f"  Open work:      {len(open_dirs)}")
+        console.print()
+    except Exception as exc:
+        console.print(f"\n[red]{exc}[/red]")
 
 
 if __name__ == "__main__":
