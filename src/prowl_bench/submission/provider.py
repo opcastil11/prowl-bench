@@ -58,7 +58,7 @@ async def get_dashboard() -> dict:
         )
         if resp.status_code == 200:
             return resp.json()
-        elif resp.status_code == 404:
+        elif resp.status_code in (403, 404):
             raise RuntimeError("Not registered as a provider. Run: prowl-bench provide register-provider")
         else:
             raise RuntimeError(f"Dashboard failed: {resp.status_code} {resp.text[:200]}")
