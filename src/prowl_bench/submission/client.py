@@ -1,4 +1,12 @@
-"""Prowl submission client — posts benchmark results to the Prowl API."""
+"""Prowl submission client — posts benchmark results to the Prowl API.
+
+Three submission paths:
+  1. submit_to_prowl()    — anonymous community submission, agent key,
+                            does NOT change the official score
+  2. submit_as_vendor()    — verified service owner, vendor JWT,
+                            CAN change the official score (with displacement guard)
+  3. provider.* (separate) — provider-network land-grab and directive flow
+"""
 from __future__ import annotations
 
 import logging
@@ -133,3 +141,86 @@ async def submit_to_prowl(report: BenchmarkReport) -> dict:
         else:
             log.error("Submission failed: %s %s", resp.status_code, resp.text[:500])
             raise RuntimeError(f"Prowl submission failed: {resp.status_code} {resp.text[:200]}")
+
+
+async def submit_as_vendor(report: BenchmarkReport) -> dict:
+    """Submit benchmark results as the verified service owner.
+
+    Hits POST /v1/benchmark/submit, which:
+      - requires a vendor JWT (PROWL_VENDOR_JWT)
+      - requires the vendor to own the service (claimed + DNS verified)
+      - CAN change the service's primary score (subject to displacement guard:
+        only displaces a Prowl/provider score if multi-LLM, higher, or stale)
+
+    The benchmarked URL must already be a registered + claimed service.
+    """
+    cfg = get_config()
+    if not cfg.prowl_vendor_jwt:
+        raise RuntimeError(
+            "PROWL_VENDOR_JWT not set. Log in at https://prowl.world/app#/login "
+            "and copy the token from localStorage (key: prowl_jwt). Then run "
+            "`export PROWL_VENDOR_JWT=eyJ...` and retry --vendor-submit."
+        )
+
+    payload = {
+        "service_id": "",  # filled in below after lookup
+        "template": report.template,
+        "overall_score": report.overall_score,
+        "dimensions": report.dimensions,
+        "pricing_normalized": report.pricing_normalized,
+        "issues": report.issues,
+        "recommendations": report.recommendations,
+        "execution_results": [
+            {
+                "test_name": r.test_name, "endpoint": r.endpoint, "method": r.method,
+                "status_code": r.status_code, "latency_ms": r.latency_ms,
+                "error": r.error,
+            }
+            for r in report.execution_results
+        ],
+        "raw_interpretation": report.raw_interpretation[:5000] if report.raw_interpretation else None,
+        "llm_providers_used": report.llm_providers_used,
+        "runner_version": report.runner_version,
+        "started_at": report.started_at,
+        "completed_at": report.completed_at,
+    }
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        # Look up the service by name, then by URL host as a fallback.
+        service_id = await _resolve_service_id(client, cfg.prowl_base_url, report.name, report.url)
+        if not service_id:
+            raise RuntimeError(
+                f"Service '{report.name}' ({report.url}) was not found in the Prowl "
+                "catalog. Vendor self-submissions require a registered + claimed + "
+                "DNS-verified service. Register it first at https://prowl.world."
+            )
+        payload["service_id"] = service_id
+
+        resp = await client.post(
+            f"{cfg.prowl_base_url}/v1/benchmark/submit",
+            headers={
+                "Authorization": f"Bearer {cfg.prowl_vendor_jwt}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+        )
+
+        if resp.status_code in (200, 201):
+            data = resp.json()
+            log.info(
+                "Vendor benchmark submitted: %s (score: %s, source: %s)",
+                data.get("submission_id"), data.get("current_score"), data.get("benchmark_source"),
+            )
+            return data
+        elif resp.status_code == 401:
+            raise RuntimeError("Invalid or expired PROWL_VENDOR_JWT. Re-login at https://prowl.world.")
+        elif resp.status_code == 403:
+            raise RuntimeError(
+                f"Permission denied: {resp.text[:300]}. The service must be claimed "
+                "by you AND have DNS verification completed."
+            )
+        elif resp.status_code == 422:
+            raise RuntimeError(f"Submission rejected (validation): {resp.text[:300]}")
+        else:
+            log.error("Vendor submission failed: %s %s", resp.status_code, resp.text[:500])
+            raise RuntimeError(f"Vendor submission failed: {resp.status_code} {resp.text[:200]}")

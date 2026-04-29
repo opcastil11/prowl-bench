@@ -14,6 +14,11 @@ class BenchConfig(BaseSettings):
     prowl_agent_key: str = ""
     prowl_base_url: str = "https://prowl.world"
 
+    # Vendor self-attestation (optional — only needed for --vendor-submit)
+    # Get a JWT by logging in at https://prowl.world/app#/login and copying
+    # the token from localStorage (key: prowl_jwt).
+    prowl_vendor_jwt: str = ""
+
     # Execution limits
     max_requests_per_benchmark: int = 20
     request_timeout_seconds: int = 30

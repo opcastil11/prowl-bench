@@ -33,22 +33,23 @@ def run(
     name: str | None = typer.Option(None, "--name", "-n", help="Service name (derived from URL if omitted)"),
     categories: str | None = typer.Option(None, "--categories", help="Comma-separated categories"),
     output: str = typer.Option("terminal", "--output", "-o", help="Output format: terminal, json"),
-    submit: bool = typer.Option(False, "--submit", "-s", help="Submit results to Prowl"),
-    provide: bool = typer.Option(False, "--provide", "-p", help="Submit as provider benchmark (earn revenue)"),
+    submit: bool = typer.Option(False, "--submit", "-s", help="Submit as community benchmark (does not change the official score)"),
+    provide: bool = typer.Option(False, "--provide", "-p", help="Submit as provider benchmark (earn revenue, land-grab)"),
+    vendor_submit: bool = typer.Option(False, "--vendor-submit", help="Submit as the verified service owner (changes the official score). Requires PROWL_VENDOR_JWT."),
     min_score: int | None = typer.Option(None, "--min-score", help="Exit non-zero if score below threshold (CI mode)"),
 ):
     """Benchmark a service URL."""
     asyncio.run(_run_benchmark(
         url=url, template=template, credential=credential, credential_type=credential_type,
         spec_file=spec_file, name=name, categories=categories, output=output,
-        submit=submit, provide=provide, min_score=min_score,
+        submit=submit, provide=provide, vendor_submit=vendor_submit, min_score=min_score,
     ))
 
 
 async def _run_benchmark(
     url: str, template: str | None, credential: str | None, credential_type: str,
     spec_file: str | None, name: str | None, categories: str | None, output: str,
-    submit: bool, provide: bool, min_score: int | None,
+    submit: bool, provide: bool, vendor_submit: bool, min_score: int | None,
 ):
     from prowl_bench.core.pipeline import run_benchmark, fetch_spec, fetch_llms_txt
     from prowl_bench.output.terminal import print_report, print_phase
@@ -148,6 +149,23 @@ async def _run_benchmark(
                     console.print(f"[red]Could not look up service: {resp.status_code}[/red]")
         except Exception as exc:
             console.print(f"[red]Provider submission failed: {exc}[/red]")
+
+    # Submit as the verified service owner (vendor self-attest)
+    if vendor_submit:
+        try:
+            from prowl_bench.submission.client import submit_as_vendor
+            result = await submit_as_vendor(report)
+            console.print(
+                f"[green]Vendor benchmark accepted[/green] "
+                f"(score: {result.get('current_score', '?')}/100, "
+                f"source: {result.get('benchmark_source', 'external')})"
+            )
+            if result.get("message"):
+                console.print(f"[dim]{result['message']}[/dim]")
+            if result.get("profile_url"):
+                console.print(f"[dim]{result['profile_url']}[/dim]")
+        except Exception as exc:
+            console.print(f"[red]Vendor submission failed: {exc}[/red]")
 
     # CI mode: exit non-zero if below threshold
     if min_score is not None and report.overall_score < min_score:

@@ -277,20 +277,42 @@ The `--min-score` flag exits with code 1 if the overall score drops below the th
 
 ## Submit to Prowl
 
-Results can be submitted to [prowl.world](https://prowl.world) for public aggregation. Submitted benchmarks are weighted by runner trust tier and averaged across all contributors.
+There are three submission paths. They differ in **who you are** and **whether your bench moves the official score**.
+
+| Flag | Auth | Effect on official score | Use when |
+|------|------|---|---|
+| `--submit` | agent key (`ak_...`) | **No** — recorded as community history | You're benchmarking someone else's service for transparency / contribution |
+| `--vendor-submit` | vendor JWT | **Yes** (with displacement guard) | You own the service (claimed + DNS verified) and want to publish your latest self-attested score |
+| `--provide` | agent key + provider profile | **Yes** (proactive provider snapshot) | You're a provider land-grabbing services to earn retroactive revenue |
+
+### 1. Community submission (--submit)
 
 ```bash
 # One-time: register for an agent key
 prowl-bench register
-
-# Set the key
 export PROWL_AGENT_KEY="ak_abc123..."
 
-# Benchmark and submit
+# Benchmark and submit as community history
 prowl-bench run https://api.example.com --submit
 ```
 
-Submitted results appear on the service's public profile at `prowl.world/app#/service/{slug}`.
+Stored on the service profile under "Community submissions". Does not move the primary score.
+
+### 2. Vendor self-attest (--vendor-submit)
+
+For service owners who want their own benchmark to update the official Prowl score.
+
+```bash
+# 1. Claim the service at prowl.world (DNS / well-known / meta-tag verification)
+# 2. Log in at https://prowl.world/app#/login
+# 3. Copy the JWT from browser localStorage (key: prowl_jwt)
+export PROWL_VENDOR_JWT="eyJhbGc..."
+
+# 4. Benchmark and self-attest
+prowl-bench run https://api.example.com --vendor-submit
+```
+
+The displacement guard prevents a one-LLM run from silently replacing a higher-trust Prowl multi-LLM score. To displace a Prowl/provider score, the submission must be: multi-LLM (≥2 providers), higher than current, or older than 14 days.
 
 ## Provider Network -- Earn Revenue
 
