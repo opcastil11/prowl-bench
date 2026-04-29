@@ -172,6 +172,12 @@ async def submit_benchmark(service_id: str, report: BenchmarkReport) -> dict:
         )
         if resp.status_code == 201:
             return resp.json()
+        elif resp.status_code == 409:
+            raise RuntimeError(
+                "Service is not active (likely pending_review or inactive) and "
+                "cannot accept proactive benchmarks. It needs to be promoted to "
+                "active in the public catalog first."
+            )
         else:
             raise RuntimeError(f"Submission failed: {resp.status_code} {resp.text[:200]}")
 
@@ -201,5 +207,11 @@ async def withdraw(amount_usd: float) -> dict:
         )
         if resp.status_code == 200:
             return resp.json()
+        elif resp.status_code == 503:
+            raise RuntimeError(
+                "Payouts are not yet enabled on the Prowl network. Your earnings "
+                "are tracked on the dashboard and will become withdrawable once "
+                "on-chain transfers are turned on."
+            )
         else:
             raise RuntimeError(f"Withdraw failed: {resp.status_code} {resp.text[:200]}")

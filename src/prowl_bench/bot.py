@@ -141,6 +141,25 @@ async def _process_directive(directive: dict) -> bool:
             pass
         return False
 
+    # Step 2.5: Detect bot-blocked targets (Cloudflare/WAF) — releasing the
+    # directive instead of submitting noise. Mirrors the backend orchestrator's
+    # BotBlocked check: 2+ probes, every one returning the same non-2xx >=400.
+    probes = report.execution_results or []
+    real_probes = [r for r in probes if r.status_code is not None]
+    if len(real_probes) >= 2:
+        statuses = {r.status_code for r in real_probes}
+        if len(statuses) == 1 and next(iter(statuses)) >= 400:
+            blocked_status = next(iter(statuses))
+            console.print(
+                f"  [yellow]Bot-blocked ({blocked_status} on every probe), "
+                f"releasing {service_name}[/yellow]"
+            )
+            try:
+                await release_directive(directive_id)
+            except Exception:
+                pass
+            return False
+
     # Step 3: Submit
     try:
         result = await submit_directive(directive_id, report)
