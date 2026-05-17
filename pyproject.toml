@@ -28,6 +28,10 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest", "pytest-asyncio", "ruff"]
+# Prowl Design subcommands (`prowl-bench design ...`). Optional because
+# the design feature pulls in mycelio + cryptography; users who only run
+# benchmarks don't need it.
+design = ["mycelio>=0.0.1"]
 
 [project.scripts]
 prowl-bench = "prowl_bench.cli:app"

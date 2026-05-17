@@ -17,8 +17,13 @@ app = typer.Typer(
 )
 provide_app = typer.Typer(help="Provider network — benchmark services and earn revenue.")
 bot_app = typer.Typer(help="Autonomous provider bot — auto-claim, benchmark, and submit directives.")
+design_app = typer.Typer(
+    help="Prowl Design — generate, score, and publish Mycelio manifests for your API.",
+    no_args_is_help=True,
+)
 app.add_typer(provide_app, name="provide")
 app.add_typer(bot_app, name="bot")
+app.add_typer(design_app, name="design")
 
 console = Console()
 
@@ -476,6 +481,184 @@ async def _bot_status():
         console.print()
     except Exception as exc:
         console.print(f"\n[red]{exc}[/red]")
+
+
+# ---------------------------------------------------------------------------
+# `prowl-bench design` — Prowl Design subcommands
+# ---------------------------------------------------------------------------
+
+
+def _require_mycelio():
+    """Import mycelio lazily and exit with install instructions if missing."""
+    try:
+        import mycelio  # noqa: F401
+    except ImportError:
+        console.print("[red]mycelio is not installed.[/red]")
+        console.print("Install with: [cyan]pip install 'prowl-bench[design]'[/cyan]")
+        raise typer.Exit(1)
+
+
+def _parse_hex_pubkey(flag: str, value: str) -> bytes:
+    try:
+        raw = bytes.fromhex(value)
+    except ValueError:
+        console.print(f"[red]{flag} must be hex (64 chars).[/red]")
+        raise typer.Exit(1)
+    if len(raw) != 32:
+        console.print(f"[red]{flag} must be 32 bytes ({len(raw)} given).[/red]")
+        raise typer.Exit(1)
+    return raw
+
+
+@design_app.command()
+def manifest(
+    source: str = typer.Argument(
+        ..., help="OpenAPI 3.x spec: an https:// URL or a local file path."
+    ),
+    vendor_pubkey: str | None = typer.Option(
+        None,
+        "--vendor-pubkey",
+        help="Vendor Ed25519 public key as hex (64 chars). If omitted, an "
+        "ephemeral keypair is generated and the seed is written next to the "
+        "manifest. Ephemeral keys are for testing only — production manifests "
+        "should use your real offline-protected key.",
+    ),
+    directory_pubkey: str | None = typer.Option(
+        None,
+        "--directory-pubkey",
+        envvar="PROWL_DIRECTORY_PUBKEY",
+        help="Directory Ed25519 pubkey (hex). Defaults to $PROWL_DIRECTORY_PUBKEY. "
+        "If neither is set, an ephemeral key is used — the resulting manifest "
+        "will NOT be valid against the real Prowl directory.",
+    ),
+    slug: str | None = typer.Option(
+        None,
+        "--slug",
+        help="Override the manifest slug. Default: derived from info.title.",
+    ),
+    output: str = typer.Option(
+        "-",
+        "--output",
+        "-o",
+        help="Path to write the unsigned manifest binary. '-' (default) prints "
+        "a hex-encoded preview to stdout instead.",
+    ),
+    sign: bool = typer.Option(
+        False,
+        "--sign",
+        help="Vendor-sign the manifest with the generated ephemeral key. "
+        "Only valid when --vendor-pubkey is NOT given. For real signing, "
+        "encode your manifest unsigned (default), then sign the bytes "
+        "offline with your own Ed25519 implementation.",
+    ),
+):
+    """Generate a Mycelio manifest from an OpenAPI 3.x spec.
+
+    By default emits an UNSIGNED manifest. The vendor's normal flow is:
+
+    \b
+        prowl-bench design manifest stripe.json --vendor-pubkey <hex> -o stripe.myc.unsigned
+        # ... sign stripe.myc.unsigned offline with your Ed25519 key ...
+        # ... submit the signed bytes to prowl.world for co-signing ...
+
+    For testing, omit --vendor-pubkey to have an ephemeral keypair generated
+    for you. Add --sign to also vendor-sign with that ephemeral key.
+    """
+    _require_mycelio()
+    from mycelio.codegen import CodegenError, manifest_from_openapi
+    from mycelio.crypto import generate_keypair
+    from mycelio.manifest import (
+        encode_unsigned_manifest,
+        encode_vendor_signed_manifest,
+        sign_vendor,
+    )
+
+    # Vendor pubkey: real or ephemeral
+    vendor_seed: bytes | None = None
+    if vendor_pubkey:
+        vendor_pub = _parse_hex_pubkey("--vendor-pubkey", vendor_pubkey)
+        if sign:
+            console.print(
+                "[red]--sign can only be used when generating an ephemeral keypair "
+                "(don't pass --vendor-pubkey).[/red]"
+            )
+            raise typer.Exit(1)
+    else:
+        console.print(
+            "[yellow]No --vendor-pubkey given — generating an ephemeral keypair "
+            "(testing only).[/yellow]"
+        )
+        vendor_seed, vendor_pub = generate_keypair()
+
+    # Directory pubkey: real, env, or ephemeral
+    if directory_pubkey:
+        dir_pub = _parse_hex_pubkey("--directory-pubkey", directory_pubkey)
+    else:
+        console.print(
+            "[yellow]No --directory-pubkey given — generating an ephemeral key. "
+            "The manifest's service_id will NOT match the real Prowl directory.[/yellow]"
+        )
+        _, dir_pub = generate_keypair()
+
+    # Codegen
+    try:
+        m = manifest_from_openapi(
+            source,
+            vendor_pubkey=vendor_pub,
+            directory_pubkey=dir_pub,
+            slug=slug,
+        )
+    except CodegenError as exc:
+        console.print(f"[red]Codegen failed: {exc}[/red]")
+        raise typer.Exit(1)
+
+    # Optional vendor signing (only with the ephemeral key)
+    if sign:
+        assert vendor_seed is not None  # checked above
+        sign_vendor(m, vendor_seed)
+        body = encode_vendor_signed_manifest(m)
+        body_label = "vendor-signed (no directory countersignature yet)"
+    else:
+        body = encode_unsigned_manifest(m)
+        body_label = "unsigned"
+
+    # Summary table
+    table = Table(title=f"Mycelio manifest ({body_label})", show_header=False)
+    table.add_column(style="cyan")
+    table.add_column()
+    table.add_row("slug", m.slug)
+    table.add_row("service_id", m.service_id.hex())
+    table.add_row("backend_url", m.backend_url)
+    table.add_row("auth_header", m.auth_header or "(none)")
+    table.add_row("auth_prefix", m.auth_prefix or "(none)")
+    table.add_row("ops", str(len(m.ops)))
+    table.add_row("bytes", str(len(body)))
+    console.print(table)
+
+    # Output the bytes
+    if output == "-":
+        console.print(f"\n[dim]hex ({len(body)} bytes):[/dim]\n{body.hex()}")
+    else:
+        from pathlib import Path
+
+        out_path = Path(output)
+        out_path.write_bytes(body)
+        console.print(f"\n[green]✓ Wrote {len(body)} bytes to {out_path}[/green]")
+
+    # If we generated keys, write the seeds so the user can recover
+    if vendor_seed is not None:
+        seed_path = (
+            output + ".vendor_seed"
+            if output != "-"
+            else "mycelio-vendor-seed.bin"
+        )
+        from pathlib import Path
+
+        Path(seed_path).write_bytes(vendor_seed)
+        console.print(
+            f"[yellow]Saved ephemeral vendor seed to {seed_path} — keep this "
+            f"if you want to re-sign or recover the manifest.[/yellow]"
+        )
 
 
 if __name__ == "__main__":
