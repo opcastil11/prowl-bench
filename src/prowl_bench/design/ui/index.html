@@ -1,0 +1,760 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prowl Design (local) — optimize your API for AI agents</title>
+<meta name="description" content="Bring your existing OpenAPI or Postman collection. Prowl Design tells you how readable it is to LLMs, suggests concrete rewrites, and auto-generates the artifacts agents need to use it.">
+<meta property="og:title" content="Prowl Design — optimize your API for AI agents">
+<meta property="og:description" content="A Postman-style tool that scores your API for LLM-readability and auto-generates llms.txt, optimized OpenAPI, and a signed Mycelio manifest. 3 free reviews/day, no signup.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://design.prowl.world/">
+<link rel="canonical" href="https://design.prowl.world/">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      colors: {
+        brand: { 400: '#34d399', 500: '#10b981', 600: '#059669' },
+      },
+      fontFamily: {
+        mono: ['JetBrains Mono', 'SF Mono', 'Menlo', 'Consolas', 'monospace'],
+      },
+    },
+  },
+};
+</script>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  html, body { background: #0b0d10; color: #e6e8ec; font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  code, pre, .mono { font-family: 'JetBrains Mono', 'SF Mono', monospace; }
+  .toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    padding: 10px 18px; border-radius: 8px; font-size: 13px; z-index: 60;
+    background: #18181b; border: 1px solid #27272a; box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+    opacity: 0; transition: opacity 0.2s;
+  }
+  .toast.show { opacity: 1; }
+  .toast.success { border-color: #047857; color: #6ee7b7; }
+  .toast.error { border-color: #b91c1c; color: #fca5a5; }
+  .toast.info { border-color: #1d4ed8; color: #93c5fd; }
+  ::selection { background: #6ee7b7; color: #0b0d10; }
+</style>
+</head>
+<body class="bg-zinc-950 text-zinc-100">
+
+<!-- Top nav -->
+<header class="border-b border-zinc-800 px-6 py-3 flex items-center justify-between sticky top-0 bg-zinc-950/90 backdrop-blur z-30">
+  <a href="/" class="font-mono font-semibold flex items-center gap-2">
+    <svg width="28" height="28" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-label="Prowl Design">
+      <g stroke="#6ee7b7" stroke-linecap="round" fill="none">
+        <path d="M 12 48 A 26 26 0 0 1 60 48" stroke-width="2.5"/>
+        <line x1="38" y1="48" x2="56" y2="28" stroke-width="3"/>
+      </g>
+      <circle cx="38" cy="48" r="3" fill="#6ee7b7"/>
+      <circle cx="56" cy="28" r="2" fill="#6ee7b7"/>
+    </svg>
+    <span>prowl design<span class="text-emerald-400">.</span></span>
+  </a>
+  <nav class="flex items-center gap-4 text-sm">
+    <a href="#try" class="text-zinc-400 hover:text-white">Try it</a>
+    <a href="#how" class="text-zinc-400 hover:text-white">How</a>
+    <a href="#pricing" class="text-zinc-400 hover:text-white">Pricing</a>
+    <a href="https://github.com/opcastil11/prowl-bench" class="text-zinc-400 hover:text-white">GitHub</a>
+    <span class="text-zinc-700">·</span>
+    <span id="auth-state" class="flex items-center gap-3">
+      <button id="signin-btn" onclick="openLogin()" class="text-zinc-200 hover:text-emerald-400">Sign in</button>
+      <a href="https://prowl.world/app#/login" class="text-emerald-400 hover:text-emerald-300 font-medium">Sign up</a>
+    </span>
+  </nav>
+</header>
+
+<!-- Hero -->
+<section class="max-w-5xl mx-auto px-6 pt-12 pb-6">
+  <div class="font-mono text-[11px] uppercase tracking-widest text-emerald-400 mb-3">v0 · running locally · open source (prowl-bench)</div>
+  <h1 class="text-4xl md:text-5xl font-bold leading-tight tracking-tight mb-4">Optimize your API for AI agents.</h1>
+  <p class="text-lg text-zinc-400 max-w-2xl mb-4">
+    Bring your existing OpenAPI or Postman collection. We score it for LLM-readability, suggest concrete rewrites, and auto-generate the artifacts agents need — <span class="text-emerald-300 mono">llms.txt</span>, an optimized <span class="text-emerald-300 mono">OpenAPI</span>, and a signed <a href="https://mycelio.prowl.world" class="text-emerald-400 underline">Mycelio</a> manifest.
+  </p>
+  <p class="text-sm text-zinc-500 mb-6">
+    <strong class="text-zinc-300">Not a Postman or Swagger replacement.</strong> The wedge is narrow: making your API legible to LLMs. Everything else (request execution, mocks, environments, team workflows) is what Postman is for.
+  </p>
+  <div class="flex flex-wrap items-center gap-2 text-xs font-mono">
+    <span class="px-3 py-1.5 rounded-full border border-emerald-700/50 text-emerald-300">3 reviews/day free · no signup</span>
+    <span class="px-3 py-1.5 rounded-full border border-zinc-800 text-zinc-400">pip install 'prowl-bench[design]'</span>
+    <span class="px-3 py-1.5 rounded-full border border-zinc-800 text-zinc-400">$0.02/review when paid</span>
+  </div>
+</section>
+
+<!-- THE TOOL -->
+<section id="try" class="max-w-7xl mx-auto px-6 py-6">
+
+  <!-- Import bar -->
+  <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-4 mb-4">
+    <div class="flex flex-wrap items-center gap-2 mb-3">
+      <div class="flex items-center gap-2 flex-1 min-w-[220px]">
+        <select id="col-switcher" onchange="switchCollection(this.value)" class="bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm">
+          <option value="__stripe_demo">Stripe demo (built-in)</option>
+        </select>
+        <button onclick="newCollection()" class="text-zinc-400 hover:text-white text-xs border border-zinc-700 rounded-lg px-2.5 py-1.5">+ New</button>
+        <button onclick="renameCollection()" class="text-zinc-400 hover:text-white text-xs border border-zinc-700 rounded-lg px-2.5 py-1.5">Rename</button>
+        <button onclick="deleteCollection()" class="text-red-400 hover:text-red-300 text-xs border border-zinc-700 rounded-lg px-2.5 py-1.5">Delete</button>
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <button onclick="document.getElementById('import-openapi-file').click()" class="bg-emerald-700 hover:bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium">Import OpenAPI</button>
+        <input type="file" id="import-openapi-file" accept=".json,.yaml,.yml" class="hidden" onchange="importOpenAPIFile(event)">
+        <button onclick="document.getElementById('import-postman-file').click()" class="bg-orange-700 hover:bg-orange-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium">Import Postman</button>
+        <input type="file" id="import-postman-file" accept=".json" class="hidden" onchange="importPostmanFile(event)">
+        <button onclick="addBlankEndpoint()" class="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-3 py-1.5 rounded-lg text-xs font-medium">+ Endpoint</button>
+        <button onclick="generateArtifacts()" class="bg-purple-700 hover:bg-purple-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium">Generate llms.txt + OpenAPI</button>
+      </div>
+    </div>
+    <div class="flex items-center gap-2">
+      <input id="import-openapi-url" placeholder="…or paste an OpenAPI URL (https://api.example.com/openapi.json)"
+        class="flex-1 bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs font-mono">
+      <button onclick="importOpenAPIUrl()" class="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-3 py-1.5 rounded-lg text-xs font-medium">Fetch + import</button>
+      <span id="import-status" class="text-xs text-zinc-500"></span>
+    </div>
+  </div>
+
+  <div class="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden flex flex-col md:flex-row min-h-[640px]">
+    <!-- Left sidebar -->
+    <aside class="md:w-72 lg:w-80 border-r border-zinc-800 bg-zinc-950/50 overflow-y-auto">
+      <div class="p-4 border-b border-zinc-800 sticky top-0 bg-zinc-950/90 backdrop-blur">
+        <input id="ep-search" placeholder="filter endpoints" oninput="endpointFilter(this.value)"
+          class="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs">
+        <div id="ep-list-meta" class="text-[10px] uppercase tracking-wider text-zinc-500 mt-2">stripe · 6 ops · scored</div>
+      </div>
+      <nav id="ep-list" class="text-sm"></nav>
+    </aside>
+    <section id="ep-detail" class="flex-1 overflow-y-auto"></section>
+  </div>
+
+  <p class="text-xs text-zinc-500 text-center mt-3">Everything above runs client-side from the local server (<code>prowl-bench design ui</code>). The "Score" button is the only network call — it goes to Prowl's hosted multi-LLM scorer at <code>prowl.world/v1/endpoint/review</code> with your free-tier credits. Disconnect from the internet and everything except scoring still works.</p>
+</section>
+
+<!-- How it works -->
+<section id="how" class="max-w-5xl mx-auto px-6 py-12 border-t border-zinc-900">
+  <h2 class="text-2xl font-semibold mb-6">How it works</h2>
+  <div class="grid md:grid-cols-3 gap-4">
+    <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
+      <div class="font-mono text-[11px] uppercase tracking-wider text-emerald-400 mb-2">01 · bring</div>
+      <h3 class="font-semibold mb-2">Import your spec</h3>
+      <p class="text-sm text-zinc-400">Paste an OpenAPI URL, upload an OpenAPI/Postman file, or build a collection from scratch. Parsing happens in your browser.</p>
+    </div>
+    <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
+      <div class="font-mono text-[11px] uppercase tracking-wider text-emerald-400 mb-2">02 · score</div>
+      <h3 class="font-semibold mb-2">Per-endpoint LLM analysis</h3>
+      <p class="text-sm text-zinc-400">Each endpoint gets an agent-readiness score, token cost, per-LLM success rate, and concrete rewrite suggestions. 3 reviews/day free.</p>
+    </div>
+    <div class="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
+      <div class="font-mono text-[11px] uppercase tracking-wider text-emerald-400 mb-2">03 · export</div>
+      <h3 class="font-semibold mb-2">Auto-generate artifacts</h3>
+      <p class="text-sm text-zinc-400">One click emits <code>llms.txt</code>, an optimized OpenAPI with the rewrites applied, and a signed Mycelio manifest you can publish.</p>
+    </div>
+  </div>
+</section>
+
+<!-- Pricing -->
+<section id="pricing" class="max-w-5xl mx-auto px-6 py-12 border-t border-zinc-900">
+  <h2 class="text-2xl font-semibold mb-2">Pricing</h2>
+  <p class="text-zinc-400 mb-6">Friction-free trial. Pay only when you outgrow the free tier.</p>
+  <div class="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+    <table class="w-full text-sm">
+      <thead class="bg-zinc-950 border-b border-zinc-800">
+        <tr><th class="text-left px-4 py-3 font-medium text-zinc-400 text-xs uppercase tracking-wider">Tier</th><th class="text-left px-4 py-3 font-medium text-zinc-400 text-xs uppercase tracking-wider">What you get</th><th class="text-right px-4 py-3 font-medium text-zinc-400 text-xs uppercase tracking-wider">Price</th></tr>
+      </thead>
+      <tbody class="divide-y divide-zinc-800">
+        <tr><td class="px-4 py-3 font-medium">Anonymous</td><td class="px-4 py-3 text-zinc-400">3 hosted reviews/day per IP · local CLI unlimited</td><td class="px-4 py-3 text-right text-emerald-400 font-mono">free</td></tr>
+        <tr><td class="px-4 py-3 font-medium">Logged-in (Prowl account)</td><td class="px-4 py-3 text-zinc-400">10 hosted reviews/day · saves your history</td><td class="px-4 py-3 text-right text-emerald-400 font-mono">free</td></tr>
+        <tr><td class="px-4 py-3 font-medium">Paid (x402 / $PROWL)</td><td class="px-4 py-3 text-zinc-400">Unlimited · live tests against your URL</td><td class="px-4 py-3 text-right font-mono">$0.02 review · $0.05 live</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="text-xs text-zinc-500 mt-4">The only thing costing real money on our side is cloud LLM inference, so that's the only thing we charge for. Artifact generation (llms.txt, OpenAPI, Mycelio manifest), publishing, and re-publishing are free at all tiers.</p>
+</section>
+
+<!-- Honest state -->
+<section class="max-w-5xl mx-auto px-6 py-12 border-t border-zinc-900">
+  <h2 class="text-2xl font-semibold mb-2">Where we honestly are</h2>
+  <p class="text-zinc-400 mb-4">v0. What works today:</p>
+  <ul class="list-disc list-inside text-sm text-zinc-400 space-y-1 ml-2">
+    <li>Import an OpenAPI spec (URL or file) or a Postman collection — fully client-side</li>
+    <li>Browse endpoints with a Swagger-like sidebar</li>
+    <li>Auto-generate <code>llms.txt</code> + optimized OpenAPI for the current collection</li>
+    <li>Local CLI: <code>prowl-bench design manifest stripe.json</code> emits a real, signable Mycelio manifest</li>
+  </ul>
+  <p class="text-zinc-400 mt-4 mb-2">What's still mock until backend lands:</p>
+  <ul class="list-disc list-inside text-sm text-zinc-500 space-y-1 ml-2">
+    <li>"Run hosted review" — currently shows pre-canned suggestions; real call to <code>/v1/endpoint/review</code> + free-tier middleware is in build</li>
+    <li>"Re-score this endpoint" — same as above</li>
+    <li>Per-vendor history persistence (anonymous = no history)</li>
+  </ul>
+</section>
+
+<!-- Footer -->
+<footer class="border-t border-zinc-900 px-6 py-8 text-xs text-zinc-500">
+  <div class="max-w-5xl mx-auto flex flex-wrap gap-4 items-baseline">
+    <a href="https://github.com/opcastil11/prowl-bench" class="text-zinc-400 hover:text-emerald-400">prowl-bench</a>
+    <a href="https://mycelio.prowl.world" class="text-zinc-400 hover:text-emerald-400">mycelio</a>
+    <a href="https://prowl.world" class="text-zinc-400 hover:text-emerald-400">prowl.world</a>
+    <span class="flex-1"></span>
+    <span>© 2026 · v0 experimental</span>
+  </div>
+</footer>
+
+<!-- Login modal -->
+<div id="login-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" onclick="if(event.target===this)closeLogin()">
+  <div class="bg-zinc-900 border border-zinc-800 rounded-xl max-w-md w-full">
+    <div class="flex items-center justify-between border-b border-zinc-800 px-6 py-4">
+      <h3 class="font-semibold">Sign in</h3>
+      <button onclick="closeLogin()" class="text-zinc-500 hover:text-white text-2xl leading-none">&times;</button>
+    </div>
+    <form id="login-form" class="p-6 space-y-4" onsubmit="submitLogin(event)">
+      <div>
+        <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-1">Email</label>
+        <input name="email" type="email" required autocomplete="email"
+          class="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-sm">
+      </div>
+      <div>
+        <label class="block text-xs uppercase tracking-wider text-zinc-500 mb-1">Password</label>
+        <input name="password" type="password" required autocomplete="current-password"
+          class="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 text-sm">
+      </div>
+      <div id="login-error" class="hidden text-xs text-red-400"></div>
+      <div class="flex items-center justify-between pt-2">
+        <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2 rounded-lg text-sm font-medium transition">Sign in</button>
+        <a href="https://prowl.world/app#/login" class="text-xs text-zinc-500 hover:text-emerald-400">New here? Create an account &rarr;</a>
+      </div>
+      <p class="text-[11px] text-zinc-600 pt-2 border-t border-zinc-800">
+        Your account works across prowl.world and design.prowl.world.
+        Free tier on this domain: <span class="text-zinc-400">3 reviews/day anonymous</span>,
+        <span class="text-emerald-400">10/day once signed in</span>.
+      </p>
+    </form>
+  </div>
+</div>
+
+<!-- Shared modal -->
+<div id="design-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" onclick="if(event.target===this)designCloseModal()">
+  <div class="bg-zinc-900 border border-zinc-800 rounded-xl max-w-3xl w-full max-h-[85vh] overflow-y-auto">
+    <div class="flex items-center justify-between border-b border-zinc-800 px-6 py-4 sticky top-0 bg-zinc-900">
+      <h3 id="design-modal-title" class="font-semibold">Diff</h3>
+      <button onclick="designCloseModal()" class="text-zinc-500 hover:text-white text-2xl leading-none">&times;</button>
+    </div>
+    <div id="design-modal-body" class="p-6"></div>
+  </div>
+</div>
+
+<script>
+// ─── Toast ───────────────────────────────────────────────────
+function toast(msg, kind = 'info') {
+  const t = document.createElement('div');
+  t.className = `toast ${kind}`;
+  t.textContent = msg;
+  document.body.appendChild(t);
+  requestAnimationFrame(() => t.classList.add('show'));
+  setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 250); }, 3000);
+}
+function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+// ─── Endpoint data ───────────────────────────────────────────
+let DESIGN_ENDPOINTS = [
+  { id: 0, method: 'POST', path: '/charges', op: 'createCharge', tag: 'Charges',
+    desc: 'Create a new charge against a customer payment source.', score: 7.4,
+    params: [
+      { name: 'amount',   in: 'body', type: 'integer', required: true,  desc: 'Smallest currency unit (cents)' },
+      { name: 'currency', in: 'body', type: 'string',  required: true,  desc: 'ISO 4217 currency code' },
+      { name: 'customer_id_or_email', in: 'body', type: 'string', required: true, desc: 'Customer ref. Accepts ID or email.', flag: 'rewrite' },
+      { name: 'source',   in: 'body', type: 'string',  required: false, desc: 'Payment source ID' },
+      { name: 'Idempotency-Key', in: 'header', type: 'string', required: false, desc: 'UUID for safe retries', flag: 'should-require' },
+    ],
+    response: { '200': { id: 'string', status: 'string', amount: 'integer', currency: 'string', payment_method: { card: { last4: 'string', brand: 'string' } } }, '402': { error_type: '?', message: 'string' } },
+    tokens: 340, llm_success: { claude: 9, 'gpt-4o': 7 },
+    issues: [
+      { tag: 'BODY',   text: 'customer_id_or_email disjunction confuses GPT-4o' },
+      { tag: 'HEADER', text: 'Idempotency-Key should be required, not optional' },
+    ],
+  },
+  { id: 1, method: 'GET', path: '/charges', op: 'listCharges', tag: 'Charges', desc: 'List charges, paginated.', score: 8.1,
+    params: [{ name: 'limit',  in: 'query', type: 'integer', required: false, desc: 'Page size (default 25, max 100)' }, { name: 'cursor', in: 'query', type: 'string',  required: false, desc: 'Opaque pagination token' }],
+    response: { '200': { data: 'array<Charge>', has_more: 'boolean', next_cursor: 'string?' } }, tokens: 180, llm_success: { claude: 10, 'gpt-4o': 10 }, issues: [] },
+  { id: 2, method: 'GET', path: '/charges/{id}', op: 'getCharge', tag: 'Charges', desc: 'Retrieve a single charge by ID.', score: 8.5,
+    params: [{ name: 'id', in: 'path', type: 'string', required: true, desc: 'Charge ID (ch_*)' }],
+    response: { '200': '$ref: Charge', '404': { error: 'string' } }, tokens: 120, llm_success: { claude: 10, 'gpt-4o': 10 }, issues: [] },
+  { id: 3, method: 'POST', path: '/refunds', op: 'createRefund', tag: 'Refunds', desc: 'Refund all or part of a charge.', score: 6.8,
+    params: [{ name: 'charge_id', in: 'body', type: 'string',  required: true,  desc: 'Charge to refund' }, { name: 'amount', in: 'body', type: 'integer', required: false, desc: 'Partial refund amount; full refund if omitted' }, { name: 'reason', in: 'body', type: 'string', required: false, desc: 'Free-form reason' }],
+    response: { '200': { id: 'string', status: 'string', amount: 'integer' }, '4xx': { message: 'string' } }, tokens: 220, llm_success: { claude: 8, 'gpt-4o': 6 },
+    issues: [{ tag: 'ERROR', text: '4xx response shape uses message but no error_type — agents have to regex' }] },
+  { id: 4, method: 'GET', path: '/refunds', op: 'listRefunds', tag: 'Refunds', desc: 'List refunds.', score: 6.4,
+    params: [{ name: 'offset', in: 'query', type: 'integer', required: false, desc: 'Pagination offset', flag: 'mixed-pagination' }, { name: 'limit',  in: 'query', type: 'integer', required: false, desc: 'Page size' }],
+    response: { '200': { data: 'array<Refund>', total: 'integer' } }, tokens: 200, llm_success: { claude: 7, 'gpt-4o': 5 },
+    issues: [{ tag: 'SHAPE', text: 'Uses offset/limit but /charges uses cursor — pick one' }] },
+  { id: 5, method: 'POST', path: '/customers', op: 'createCustomer', tag: 'Customers', desc: 'Create a customer record.', score: 7.9,
+    params: [{ name: 'email', in: 'body', type: 'string', required: true,  desc: 'Customer email' }, { name: 'name',  in: 'body', type: 'string', required: false, desc: 'Display name' }, { name: 'metadata', in: 'body', type: 'object', required: false, desc: 'Free-form key/value' }],
+    response: { '200': { id: 'string', email: 'string', created: 'integer' } }, tokens: 160, llm_success: { claude: 10, 'gpt-4o': 9 }, issues: [] },
+];
+
+let DESIGN_COL_META = { name: 'Stripe demo (built-in)', key: '__stripe_demo' };
+
+function _methodColor(m) {
+  return { GET: 'bg-emerald-900/50 text-emerald-300', POST: 'bg-blue-900/50 text-blue-300', PUT: 'bg-amber-900/50 text-amber-300', PATCH: 'bg-amber-900/50 text-amber-300', DELETE: 'bg-red-900/50 text-red-300' }[m] || 'bg-zinc-800 text-zinc-300';
+}
+function _scoreColor(s) {
+  if (s == null) return 'text-zinc-500';
+  if (s >= 8) return 'text-emerald-400';
+  if (s >= 6.5) return 'text-yellow-400';
+  return 'text-orange-400';
+}
+
+function renderEndpointList(filter = '') {
+  const host = document.getElementById('ep-list');
+  if (!host) return;
+  const f = filter.toLowerCase().trim();
+  const visible = DESIGN_ENDPOINTS.filter(e => !f || e.path.toLowerCase().includes(f) || e.op.toLowerCase().includes(f) || e.tag.toLowerCase().includes(f));
+  const byTag = {};
+  visible.forEach(e => { (byTag[e.tag] = byTag[e.tag] || []).push(e); });
+  host.innerHTML = Object.keys(byTag).map(tag => `
+    <div class="border-b border-zinc-800 last:border-0">
+      <div class="px-4 py-2 text-[10px] uppercase tracking-wider text-zinc-500 bg-zinc-900/50">${esc(tag)}</div>
+      ${byTag[tag].map(e => `
+        <button onclick="selectEndpoint(${e.id})" data-ep-id="${e.id}" class="ep-row w-full text-left px-4 py-2.5 flex items-center gap-2 hover:bg-zinc-900 border-l-2 border-transparent transition">
+          <span class="font-mono text-[10px] uppercase font-bold px-1.5 py-0.5 rounded shrink-0 w-12 text-center ${_methodColor(e.method)}">${e.method}</span>
+          <span class="font-mono text-xs text-zinc-200 truncate flex-1">${esc(e.path)}</span>
+          <span class="text-xs font-bold ${_scoreColor(e.score)}">${e.score != null ? e.score : '—'}</span>
+        </button>
+      `).join('')}
+    </div>
+  `).join('') || '<div class="p-4 text-xs text-zinc-500">No matches.</div>';
+}
+
+function endpointFilter(q) { renderEndpointList(q); }
+
+function selectEndpoint(id) {
+  const e = DESIGN_ENDPOINTS.find(x => x.id === id);
+  if (!e) return;
+  document.querySelectorAll('.ep-row').forEach(b => {
+    if (parseInt(b.dataset.epId) === id) { b.classList.add('bg-zinc-900', 'border-l-emerald-500'); }
+    else { b.classList.remove('bg-zinc-900', 'border-l-emerald-500'); }
+  });
+  const claudePct = Math.round((e.llm_success.claude || 0) * 10);
+  const gptPct = Math.round((e.llm_success['gpt-4o'] || 0) * 10);
+  const scored = e.score != null;
+  const detail = document.getElementById('ep-detail');
+  detail.innerHTML = `
+    <div class="p-6">
+      <div class="flex items-center gap-3 mb-2 flex-wrap">
+        <span class="font-mono text-[11px] uppercase font-bold px-2 py-1 rounded ${_methodColor(e.method)}">${e.method}</span>
+        <span class="font-mono text-base text-zinc-100">${esc(e.path)}</span>
+        <span class="text-xs text-zinc-500 ml-auto">operationId: <code class="text-zinc-400">${esc(e.op)}</code></span>
+      </div>
+      <p class="text-sm text-zinc-400 mb-6">${esc(e.desc) || '—'}</p>
+      <div class="grid lg:grid-cols-5 gap-4">
+        <div class="lg:col-span-3 space-y-4">
+          <div class="bg-zinc-950 border border-zinc-800 rounded-lg overflow-hidden">
+            <div class="px-4 py-2.5 border-b border-zinc-800 text-xs uppercase tracking-wider text-zinc-500">Parameters</div>
+            <div class="divide-y divide-zinc-800">
+              ${e.params.map(p => `
+                <div class="px-4 py-2.5 flex items-start gap-3 text-sm">
+                  <span class="font-mono text-emerald-300 shrink-0">${esc(p.name)}</span>
+                  <span class="text-[10px] uppercase tracking-wider bg-zinc-800 text-zinc-400 px-1.5 py-0.5 rounded shrink-0 mt-0.5">${esc(p.in)}</span>
+                  <span class="text-xs text-zinc-500 shrink-0 mt-0.5">${esc(p.type)}${p.required ? ' · required' : ''}</span>
+                  ${p.flag ? `<span class="text-[10px] uppercase tracking-wider bg-amber-900/40 text-amber-300 px-1.5 py-0.5 rounded shrink-0 mt-0.5">flagged</span>` : ''}
+                  <span class="text-xs text-zinc-400 ml-auto text-right max-w-[40%]">${esc(p.desc)}</span>
+                </div>
+              `).join('') || '<div class="px-4 py-3 text-xs text-zinc-500">No parameters.</div>'}
+            </div>
+          </div>
+          <div class="bg-zinc-950 border border-zinc-800 rounded-lg overflow-hidden">
+            <div class="px-4 py-2.5 border-b border-zinc-800 text-xs uppercase tracking-wider text-zinc-500">Response shape</div>
+            <pre class="px-4 py-3 text-xs leading-relaxed text-zinc-300 overflow-x-auto whitespace-pre">${esc(JSON.stringify(e.response, null, 2))}</pre>
+          </div>
+          <div class="bg-zinc-950 border border-zinc-800 rounded-lg overflow-hidden">
+            <div class="px-4 py-2.5 border-b border-zinc-800 flex items-center justify-between">
+              <span class="text-xs uppercase tracking-wider text-zinc-500">Try it out</span>
+              <button onclick="tryItOut(${e.id})" class="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1 rounded text-xs font-medium">Execute</button>
+            </div>
+            <div class="p-4 space-y-2">
+              ${e.params.map(p => `
+                <div class="flex items-center gap-2 text-xs">
+                  <span class="font-mono text-zinc-400 w-32 truncate">${esc(p.name)}</span>
+                  <input placeholder="${esc(p.type)}${p.required ? ' · required' : ''}" class="flex-1 bg-zinc-900 border border-zinc-800 rounded px-2 py-1 font-mono">
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+        <div class="lg:col-span-2 space-y-4">
+          <div class="bg-gradient-to-br from-emerald-950/30 to-zinc-950 border border-emerald-900/40 rounded-lg p-4">
+            <div class="text-[10px] uppercase tracking-wider text-emerald-400 mb-1">Agent-readiness</div>
+            <div class="flex items-baseline gap-2">
+              <div class="text-3xl font-bold ${_scoreColor(e.score)}">${scored ? e.score : '—'}</div>
+              <div class="text-zinc-500 text-sm">/ 10</div>
+            </div>
+            <button onclick="rescoreEndpoint(${e.id})" class="mt-3 w-full bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded text-xs font-medium">${scored ? 'Re-score' : 'Score this endpoint'} (free · 3/day)</button>
+          </div>
+          ${scored ? `
+          <div class="bg-zinc-950 border border-zinc-800 rounded-lg p-4">
+            <div class="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">Token cost / call</div>
+            <div class="text-2xl font-bold text-zinc-100">${e.tokens}</div>
+            <div class="text-xs text-zinc-500 mt-1">Estimated LLM tokens if an agent reads spec + response.</div>
+          </div>
+          <div class="bg-zinc-950 border border-zinc-800 rounded-lg p-4">
+            <div class="text-[10px] uppercase tracking-wider text-zinc-500 mb-3">First-try success (last 10 runs)</div>
+            <div class="space-y-2">
+              <div><div class="flex justify-between text-xs mb-1"><span class="text-zinc-300">Claude</span><span class="font-mono text-zinc-400">${claudePct}%</span></div><div class="h-1.5 bg-zinc-800 rounded-full overflow-hidden"><div class="h-full bg-emerald-500" style="width:${claudePct}%"></div></div></div>
+              <div><div class="flex justify-between text-xs mb-1"><span class="text-zinc-300">GPT-4o</span><span class="font-mono text-zinc-400">${gptPct}%</span></div><div class="h-1.5 bg-zinc-800 rounded-full overflow-hidden"><div class="h-full ${gptPct >= 80 ? 'bg-emerald-500' : gptPct >= 60 ? 'bg-yellow-500' : 'bg-orange-500'}" style="width:${gptPct}%"></div></div></div>
+            </div>
+          </div>
+          ${e.issues.length ? `
+          <div class="bg-zinc-950 border border-zinc-800 rounded-lg p-4">
+            <div class="text-[10px] uppercase tracking-wider text-zinc-500 mb-3">Issues · ${e.issues.length}</div>
+            <div class="space-y-2">
+              ${e.issues.map(i => `
+                <div class="flex gap-2 items-start text-xs">
+                  <span class="text-[9px] uppercase tracking-wider bg-amber-900/40 text-amber-300 px-1.5 py-0.5 rounded shrink-0 font-mono">${esc(i.tag)}</span>
+                  <span class="text-zinc-300">${esc(i.text)}</span>
+                </div>
+              `).join('')}
+            </div>
+          </div>` : `<div class="bg-emerald-950/30 border border-emerald-900/40 rounded-lg p-4 text-center"><div class="text-emerald-300 text-sm">No issues flagged.</div><div class="text-xs text-zinc-500 mt-1">This endpoint reads cleanly for both LLMs.</div></div>`}
+          ` : `<div class="bg-zinc-950 border border-zinc-800 rounded-lg p-6 text-center text-sm text-zinc-500">Endpoint not yet scored.<br>Click "Score this endpoint" to run analysis.</div>`}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function tryItOut(id) { toast('Live test ($0.05) is paid-only — pay via x402 to enable. Free tier covers /review only.', 'info'); }
+
+async function rescoreEndpoint(id) {
+  const e = DESIGN_ENDPOINTS.find(x => x.id === id);
+  if (!e) return;
+  // Build a minimal OpenAPI spec from the current collection for the LLM.
+  // We send the whole collection so the LLM has cross-endpoint context.
+  const inlineSpec = _genOpenAPI(DESIGN_ENDPOINTS, DESIGN_COL_META.name);
+  const specText = JSON.stringify(inlineSpec);
+  const targetOp = `${e.method} ${e.path}`;
+  toast('Scoring · multi-LLM · ~3-8s', 'info');
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    if (auth?.access_token) headers['Authorization'] = `Bearer ${auth.access_token}`;
+    const res = await fetch(`${PROWL_API}/v1/endpoint/review`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ spec_inline: specText, target_endpoint: targetOp }),
+    });
+    if (res.status === 402) {
+      const challenge = await res.json().catch(() => ({}));
+      const tier = auth?.access_token ? 'logged-in (10/day)' : 'anonymous (3/day)';
+      toast(`Free tier exhausted (${tier}). Pay $${(parseInt(challenge?.accepts?.[0]?.maxAmountRequired || '0') / 1e6).toFixed(2)} via x402 or sign in.`, 'error');
+      return;
+    }
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      toast('Score failed: ' + (err.detail || `HTTP ${res.status}`), 'error');
+      return;
+    }
+    const data = await res.json();
+    // Update endpoint with real scores
+    e.score = data.overall;
+    e.tokens = Math.round((data.dimensions?.token_bloat || 5) * 60 + 80); // rough heuristic display
+    e.llm_success = data.providers_used.reduce((acc, p) => {
+      const provNorm = p.toLowerCase().includes('claude') ? 'claude' : (p.toLowerCase().includes('openai') || p.toLowerCase().includes('gpt')) ? 'gpt-4o' : p;
+      acc[provNorm] = Math.round(data.overall);  // proxy for first-try success
+      return acc;
+    }, {});
+    e.issues = data.suggestions.map(s => ({ tag: s.tag, text: s.title }));
+    selectEndpoint(id);
+    _refreshList();
+    toast(`Scored: ${data.overall}/10 · ${data.tier} · $${data.cost_usd}`, 'success');
+  } catch (err) {
+    toast('Connection failed: ' + err.message, 'error');
+  }
+}
+
+// ─── Import / collections / artifacts ───
+function _setStatus(msg, color = 'zinc') {
+  const el = document.getElementById('import-status');
+  if (!el) return;
+  el.textContent = msg;
+  el.className = `text-xs text-${color}-400`;
+  if (color === 'emerald' || color === 'red') setTimeout(() => { el.textContent = ''; }, 4000);
+}
+function _refreshList() {
+  document.getElementById('ep-list-meta').textContent = `${DESIGN_COL_META.name.toLowerCase().replace(/\s+/g, '-')} · ${DESIGN_ENDPOINTS.length} ops${DESIGN_ENDPOINTS.some(e => e.score != null) ? ' · scored' : ' · unscored'}`;
+  renderEndpointList(document.getElementById('ep-search')?.value || '');
+  if (DESIGN_ENDPOINTS.length) selectEndpoint(DESIGN_ENDPOINTS[0].id);
+  else document.getElementById('ep-detail').innerHTML = `<div class="p-12 text-center"><div class="text-zinc-500 text-sm mb-3">No endpoints in this collection.</div><button onclick="addBlankEndpoint()" class="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-4 py-2 rounded-lg text-sm font-medium transition">+ Add endpoint</button></div>`;
+}
+function _parseOpenAPI(spec) {
+  if (!spec || typeof spec !== 'object') throw new Error('Spec must be a JSON object');
+  if (!spec.openapi || !String(spec.openapi).startsWith('3.')) throw new Error('Only OpenAPI 3.x supported. Got: ' + (spec.swagger || spec.openapi || 'unknown'));
+  const paths = spec.paths || {}; const endpoints = []; let id = 0;
+  const components = spec.components || {};
+  const resolveRef = (obj) => {
+    if (!obj || typeof obj !== 'object') return obj;
+    if (obj.$ref && obj.$ref.startsWith('#/components/')) {
+      const parts = obj.$ref.slice('#/components/'.length).split('/');
+      let cur = components;
+      for (const p of parts) { cur = cur?.[p]; if (cur == null) return obj; }
+      return cur;
+    }
+    return obj;
+  };
+  for (const [path, item] of Object.entries(paths)) {
+    if (!item || typeof item !== 'object') continue;
+    const pathParams = item.parameters || [];
+    for (const method of ['get','post','put','patch','delete']) {
+      const op = item[method];
+      if (!op || typeof op !== 'object') continue;
+      const params = [];
+      for (const p of [...pathParams, ...(op.parameters || [])]) {
+        const r = resolveRef(p);
+        if (!r?.name || !r?.in || r.in === 'cookie') continue;
+        params.push({ name: r.name, in: r.in, type: r.schema?.type || 'string', required: !!r.required, desc: r.description || '' });
+      }
+      const rb = op.requestBody && resolveRef(op.requestBody);
+      if (rb?.content) {
+        const ct = rb.content['application/json'] || rb.content['application/x-www-form-urlencoded'] || Object.values(rb.content)[0];
+        const sch = ct && resolveRef(ct.schema || {});
+        if (sch && sch.properties) {
+          const reqSet = new Set(sch.required || []);
+          for (const [pname, pschema] of Object.entries(sch.properties)) {
+            params.push({ name: pname, in: 'body', type: pschema.type || 'object', required: !!rb.required && reqSet.has(pname), desc: pschema.description || '' });
+          }
+        }
+      }
+      const respShape = {};
+      for (const code of ['200','201','default','4xx','5xx']) {
+        if (op.responses?.[code]) {
+          const r = resolveRef(op.responses[code]);
+          const sch = resolveRef(r.content?.['application/json']?.schema || {});
+          respShape[code] = sch.type ? sch.type : (sch.properties ? '(object)' : '(any)');
+        }
+      }
+      endpoints.push({ id: id++, method: method.toUpperCase(), path, op: op.operationId || `${method}-${path.replace(/[{}/]/g, '-').replace(/^-+|-+$/g, '')}`, tag: (op.tags && op.tags[0]) || 'default', desc: op.summary || op.description || '', score: null, params, response: respShape, tokens: 100 + params.length * 25, llm_success: { claude: null, 'gpt-4o': null }, issues: [] });
+    }
+  }
+  return endpoints;
+}
+function _parsePostman(coll) {
+  if (!coll || !coll.info || !coll.item) throw new Error('Not a Postman v2.x collection');
+  const endpoints = []; let id = 0;
+  const walk = (items, tag) => {
+    for (const it of items) {
+      if (it.item) { walk(it.item, it.name || tag); continue; }
+      if (!it.request) continue;
+      const req = it.request;
+      const method = (typeof req.method === 'string' ? req.method : 'GET').toUpperCase();
+      const url = req.url;
+      let path = '';
+      if (typeof url === 'string') path = '/' + (url.split(/\?|#/)[0].replace(/^https?:\/\/[^/]+\/?/, ''));
+      else if (url?.path) path = '/' + url.path.join('/');
+      else if (url?.raw) path = '/' + (url.raw.split(/\?|#/)[0].replace(/^https?:\/\/[^/]+\/?/, ''));
+      const params = [];
+      for (const h of (req.header || [])) if (h.key) params.push({ name: h.key, in: 'header', type: 'string', required: !h.disabled, desc: h.description || '' });
+      for (const q of (url?.query || [])) if (q.key) params.push({ name: q.key, in: 'query', type: 'string', required: !q.disabled, desc: q.description || '' });
+      if (req.body?.mode === 'urlencoded') for (const f of req.body.urlencoded || []) if (f.key) params.push({ name: f.key, in: 'body', type: 'string', required: !f.disabled, desc: f.description || '' });
+      if (req.body?.mode === 'formdata')   for (const f of req.body.formdata   || []) if (f.key) params.push({ name: f.key, in: 'body', type: 'string', required: !f.disabled, desc: f.description || '' });
+      if (req.body?.mode === 'raw') { try { const j = JSON.parse(req.body.raw || '{}'); for (const k of Object.keys(j)) params.push({ name: k, in: 'body', type: typeof j[k], required: true, desc: '' }); } catch {} }
+      endpoints.push({ id: id++, method, path: path || '/', op: (it.name || `${method}-${path}`).replace(/\s+/g, '_'), tag: tag || 'default', desc: it.name || req.description || '', score: null, params, response: { '200': '(unknown — Postman collections don\'t carry response shape)' }, tokens: 100 + params.length * 25, llm_success: { claude: null, 'gpt-4o': null }, issues: [] });
+    }
+  };
+  walk(coll.item, coll.info?.name);
+  return endpoints;
+}
+async function importOpenAPIUrl() {
+  const url = (document.getElementById('import-openapi-url')?.value || '').trim();
+  if (!url) { _setStatus('Paste a URL first', 'red'); return; }
+  _setStatus('Fetching…', 'zinc');
+  try {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const spec = await r.json();
+    const eps = _parseOpenAPI(spec);
+    DESIGN_ENDPOINTS = eps;
+    DESIGN_COL_META = { name: spec.info?.title || 'imported', key: '__imported_' + Date.now() };
+    _refreshList();
+    _setStatus(`Imported ${eps.length} ops`, 'emerald');
+  } catch (e) { _setStatus('Failed: ' + e.message, 'red'); }
+}
+function importOpenAPIFile(event) {
+  const file = event.target.files?.[0]; if (!file) return;
+  const r = new FileReader();
+  r.onload = () => {
+    try {
+      const text = r.result; let spec;
+      try { spec = JSON.parse(text); } catch { _setStatus('YAML support needs server-side parse; convert to JSON first', 'red'); return; }
+      const eps = _parseOpenAPI(spec);
+      DESIGN_ENDPOINTS = eps;
+      DESIGN_COL_META = { name: spec.info?.title || file.name, key: '__imported_' + Date.now() };
+      _refreshList();
+      _setStatus(`Imported ${eps.length} ops from ${file.name}`, 'emerald');
+    } catch (e) { _setStatus('Failed: ' + e.message, 'red'); }
+  };
+  r.readAsText(file); event.target.value = '';
+}
+function importPostmanFile(event) {
+  const file = event.target.files?.[0]; if (!file) return;
+  const r = new FileReader();
+  r.onload = () => {
+    try {
+      const coll = JSON.parse(r.result);
+      const eps = _parsePostman(coll);
+      DESIGN_ENDPOINTS = eps;
+      DESIGN_COL_META = { name: coll.info?.name || file.name, key: '__imported_' + Date.now() };
+      _refreshList();
+      _setStatus(`Imported ${eps.length} requests from ${file.name}`, 'emerald');
+    } catch (e) { _setStatus('Failed: ' + e.message, 'red'); }
+  };
+  r.readAsText(file); event.target.value = '';
+}
+function switchCollection(key) { if (key === '__stripe_demo') toast('Switching collections persists locally in next iteration. Refresh to reset.', 'info'); }
+function newCollection() { DESIGN_ENDPOINTS = []; DESIGN_COL_META = { name: 'New collection', key: '__new_' + Date.now() }; _refreshList(); _setStatus('New empty collection', 'emerald'); }
+function renameCollection() { const name = prompt('New name:', DESIGN_COL_META.name); if (!name) return; DESIGN_COL_META.name = name; _refreshList(); }
+function deleteCollection() { if (!confirm(`Delete "${DESIGN_COL_META.name}"?`)) return; newCollection(); }
+function addBlankEndpoint() {
+  const id = DESIGN_ENDPOINTS.length;
+  DESIGN_ENDPOINTS.push({ id, method: 'GET', path: '/new', op: 'newOp_' + id, tag: 'default', desc: 'New endpoint — edit in detail pane', score: null, params: [], response: { '200': '(define)' }, tokens: 100, llm_success: { claude: null, 'gpt-4o': null }, issues: [] });
+  _refreshList();
+}
+
+// ─── Modal + artifact generation ───
+function designCloseModal() { document.getElementById('design-modal')?.classList.add('hidden'); }
+function _designShowModal(title, body) {
+  document.getElementById('design-modal-title').textContent = title;
+  document.getElementById('design-modal-body').innerHTML = body;
+  document.getElementById('design-modal').classList.remove('hidden');
+}
+function generateArtifacts() {
+  const llmsTxt = _genLlmsTxt(DESIGN_ENDPOINTS, DESIGN_COL_META.name);
+  const openapi = _genOpenAPI(DESIGN_ENDPOINTS, DESIGN_COL_META.name);
+  _designShowModal('Generated artifacts', `
+    <p class="text-sm text-zinc-400 mb-4">Auto-generated from your collection. These are the agent-facing artifacts a vendor would publish alongside (or instead of) their human-facing docs.</p>
+    <div class="space-y-4">
+      <div>
+        <div class="flex items-center justify-between mb-2"><span class="text-xs uppercase tracking-wider text-zinc-500">llms.txt <span class="ml-2 text-emerald-400 normal-case tracking-normal">agent-readable docs</span></span><button onclick="navigator.clipboard.writeText(${JSON.stringify(llmsTxt)}).then(()=>toast('Copied','success'))" class="text-xs text-zinc-400 hover:text-emerald-400">copy</button></div>
+        <pre class="bg-zinc-950 border border-zinc-800 rounded-lg p-4 text-xs leading-relaxed text-zinc-300 overflow-auto max-h-72 whitespace-pre">${esc(llmsTxt)}</pre>
+      </div>
+      <div>
+        <div class="flex items-center justify-between mb-2"><span class="text-xs uppercase tracking-wider text-zinc-500">Optimized OpenAPI <span class="ml-2 text-emerald-400 normal-case tracking-normal">with rewrites applied</span></span><button onclick="navigator.clipboard.writeText(${JSON.stringify(JSON.stringify(openapi, null, 2))}).then(()=>toast('Copied','success'))" class="text-xs text-zinc-400 hover:text-emerald-400">copy</button></div>
+        <pre class="bg-zinc-950 border border-zinc-800 rounded-lg p-4 text-xs leading-relaxed text-zinc-300 overflow-auto max-h-72 whitespace-pre">${esc(JSON.stringify(openapi, null, 2))}</pre>
+      </div>
+    </div>
+  `);
+}
+function _genLlmsTxt(endpoints, title) {
+  const byTag = {};
+  for (const e of endpoints) (byTag[e.tag] = byTag[e.tag] || []).push(e);
+  let out = `# ${title}\n\n> Agent-readable API summary. Generated by Prowl Design.\n\n## Quick start\n\nThe API is REST-shaped. ${endpoints.length} endpoints across ${Object.keys(byTag).length} resource groups.\n\n`;
+  for (const tag of Object.keys(byTag)) {
+    out += `## ${tag}\n\n`;
+    for (const e of byTag[tag]) {
+      out += `- \`${e.method} ${e.path}\``;
+      if (e.desc) out += ` — ${e.desc}`;
+      out += `\n`;
+      const required = e.params.filter(p => p.required);
+      if (required.length) out += `  - required: ${required.map(p => `\`${p.name}\` (${p.in})`).join(', ')}\n`;
+    }
+    out += `\n`;
+  }
+  out += `\n---\nGenerated ${new Date().toISOString().slice(0,10)} · ${endpoints.length} ops\n`;
+  return out;
+}
+function _genOpenAPI(endpoints, title) {
+  const paths = {};
+  for (const e of endpoints) {
+    paths[e.path] = paths[e.path] || {};
+    paths[e.path][e.method.toLowerCase()] = {
+      operationId: e.op, summary: e.desc || undefined, tags: [e.tag],
+      parameters: e.params.filter(p => p.in !== 'body').map(p => ({ name: p.name, in: p.in, required: p.required, description: p.desc || undefined, schema: { type: p.type } })),
+      ...(e.params.some(p => p.in === 'body') ? {
+        requestBody: { required: e.params.some(p => p.in === 'body' && p.required), content: { 'application/json': { schema: { type: 'object', required: e.params.filter(p => p.in === 'body' && p.required).map(p => p.name), properties: Object.fromEntries(e.params.filter(p => p.in === 'body').map(p => [p.name, { type: p.type, description: p.desc || undefined }])) } } } },
+      } : {}),
+      responses: Object.fromEntries(Object.entries(e.response).map(([code, _]) => [code, { description: '' }])),
+    };
+  }
+  return { openapi: '3.0.3', info: { title, version: '1.0.0', description: 'Optimized for LLM consumption by Prowl Design' }, paths };
+}
+
+// ─── Auth (cross-subdomain JWT, mirrors prowl.world/app) ───
+const PROWL_API = 'https://prowl.world';
+let auth = null;
+try { auth = JSON.parse(localStorage.getItem('prowl_auth') || 'null'); } catch (e) { auth = null; }
+
+function renderAuthState() {
+  const host = document.getElementById('auth-state');
+  if (!host) return;
+  if (auth?.access_token) {
+    const email = auth.email || 'signed in';
+    host.innerHTML = `
+      <span class="text-xs text-zinc-500" title="${esc(email)}">
+        ${esc(email.length > 24 ? email.slice(0, 22) + '…' : email)}
+        <span class="text-emerald-400 ml-1 font-mono">· 10/day</span>
+      </span>
+      <a href="https://prowl.world/app" class="text-zinc-400 hover:text-white">Dashboard</a>
+      <button onclick="signOut()" class="text-zinc-500 hover:text-red-400">Sign out</button>
+    `;
+  } else {
+    host.innerHTML = `
+      <span class="text-[11px] text-zinc-500 font-mono mr-1">3/day free</span>
+      <button id="signin-btn" onclick="openLogin()" class="text-zinc-200 hover:text-emerald-400">Sign in</button>
+      <a href="https://prowl.world/app#/login" class="text-emerald-400 hover:text-emerald-300 font-medium">Sign up</a>
+    `;
+  }
+}
+
+function openLogin() { document.getElementById('login-modal').classList.remove('hidden'); }
+function closeLogin() {
+  document.getElementById('login-modal').classList.add('hidden');
+  document.getElementById('login-error').classList.add('hidden');
+}
+
+async function submitLogin(e) {
+  e.preventDefault();
+  const f = new FormData(e.target);
+  const email = f.get('email');
+  const password = f.get('password');
+  const errEl = document.getElementById('login-error');
+  errEl.classList.add('hidden');
+  try {
+    const res = await fetch(`${PROWL_API}/v1/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      errEl.textContent = j.detail || `Login failed (HTTP ${res.status})`;
+      errEl.classList.remove('hidden');
+      return;
+    }
+    const data = await res.json();
+    auth = { email, access_token: data.access_token, refresh_token: data.refresh_token, vendor_id: data.vendor_id };
+    localStorage.setItem('prowl_auth', JSON.stringify(auth));
+    closeLogin();
+    renderAuthState();
+    toast('Signed in · 10/day free reviews', 'success');
+  } catch (err) {
+    errEl.textContent = 'Connection failed. Try again.';
+    errEl.classList.remove('hidden');
+  }
+}
+
+function signOut() {
+  localStorage.removeItem('prowl_auth');
+  auth = null;
+  renderAuthState();
+  toast('Signed out', 'info');
+}
+
+// boot
+renderAuthState();
+renderEndpointList();
+selectEndpoint(0);
+</script>
+
+</body>
+</html>

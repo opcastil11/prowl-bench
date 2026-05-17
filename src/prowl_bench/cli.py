@@ -498,6 +498,45 @@ def _require_mycelio():
         raise typer.Exit(1)
 
 
+@design_app.command()
+def ui(
+    port: int = typer.Option(
+        4711,
+        "--port",
+        "-p",
+        help="Local port to serve the UI on. Auto-bumps to the next free port if taken.",
+    ),
+    no_open: bool = typer.Option(
+        False,
+        "--no-open",
+        help="Don't auto-launch a browser. Useful when running over SSH / headless.",
+    ),
+):
+    """Launch the Prowl Design web UI locally.
+
+    Serves the same Postman-for-LLMs UI you'd find at design.prowl.world,
+    but from your machine. Your collection stays local; only the
+    "Score this endpoint" button calls out (to Prowl's hosted multi-LLM
+    scorer, with your daily free-tier credits).
+    """
+    from prowl_bench.design.server import find_open_port, serve
+
+    try:
+        actual_port = find_open_port(start=port)
+    except RuntimeError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+
+    if actual_port != port:
+        console.print(f"[yellow]Port {port} taken — using {actual_port} instead.[/yellow]")
+
+    try:
+        serve(port=actual_port, open_browser=not no_open)
+    except FileNotFoundError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1)
+
+
 def _parse_hex_pubkey(flag: str, value: str) -> bytes:
     try:
         raw = bytes.fromhex(value)
