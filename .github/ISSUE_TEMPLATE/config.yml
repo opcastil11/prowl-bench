@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Prowl docs
+    url: https://prowl.world/llms.txt
+    about: API documentation for the hosted Prowl service that prowl-bench submits to.
+  - name: ASO definitional essay
+    url: https://prowl.world/blog/what-is-agent-search-optimization
+    about: Background on what we're scoring and why.
+  - name: Community
+    url: https://x.com/prowl_world
+    about: Updates, release notes, and questions on X.
+  - name: Email
+    url: mailto:agent@prowl.world
+    about: Direct contact for integrations, press, or anything that doesn't fit a GitHub issue.

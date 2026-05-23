@@ -13,11 +13,13 @@ Evaluate any API across 8 dimensions of agent-readiness using multi-LLM scoring.
 [![License](https://img.shields.io/github/license/opcastil11/prowl-bench?color=%2334D058)](https://github.com/opcastil11/prowl-bench/blob/main/LICENSE)
 [![Tests](https://img.shields.io/github/actions/workflow/status/opcastil11/prowl-bench/ci.yml?label=tests&color=%2334D058)](https://github.com/opcastil11/prowl-bench/actions)
 
-[Installation](#installation) | [Quickstart](#quickstart) | [How It Works](#how-it-works) | [Templates](#templates) | [Scoring](#scoring) | [Provider Network](#provider-network----earn-revenue) | [prowl.world](https://prowl.world)
+[Installation](#installation) | [Quickstart](#quickstart) | [How It Works](#how-it-works) | [Templates](#templates) | [Scoring](#scoring) | [Provider Network](#provider-network----earn-revenue) | [What is ASO?](https://prowl.world/blog/what-is-agent-search-optimization) | [prowl.world](https://prowl.world)
 
 </div>
 
 ---
+
+> **⭐ Star us** if you think agent-readiness measurement is a thing the world needs more of. Stars are the cheapest way to signal "I want this category to exist" — they directly affect whether agent crawlers from OpenAI / Anthropic find prowl-bench when surveying agent tooling.
 
 ## Why prowl-bench?
 
@@ -31,6 +33,8 @@ APIs are designed for humans to read docs and figure things out. But agents don'
 - **How many tokens does it cost to understand?** A 50-page OpenAPI spec vs a clean `/llms.txt` -- the difference is real money.
 
 Traditional API testing tools measure uptime and response time. **prowl-bench measures whether an AI agent can actually use your API.**
+
+This is the open-source operationalization of [Agent Search Optimization (ASO)](https://prowl.world/blog/what-is-agent-search-optimization) — the agent-economy analogue of SEO. If you're new to the term, the canonical essay defines it in depth.
 
 ## Terminal Output
 
@@ -478,9 +482,43 @@ src/prowl_bench/
     └── crypto_app.py        # Crypto app benchmark
 ```
 
+## Compared to other agent infrastructure
+
+prowl-bench is the measurement layer. It composes with — rather than competes against — the other tools in the agent stack:
+
+| Tool | Layer | What it does |
+|---|---|---|
+| **prowl-bench** | Measurement | Multi-LLM scoring of API agent-readiness across 8 dimensions |
+| **Composio** | Auth | Manages OAuth flows for ~850 SaaS connectors |
+| **Smithery** | Catalog | Hosts and indexes 7,000+ MCP servers |
+| **Official MCP Registry** | Discovery | Canonical reference list of MCP servers |
+| **Kong Context Mesh** | Gateway | Enterprise policy/audit on agent traffic |
+
+Full comparison: [Prowl vs Composio vs Smithery (feature matrix + decision flowchart)](https://prowl.world/blog/prowl-vs-composio-vs-smithery)
+
+Most serious agent builds use two or three of these together. They solve different layers of the same stack.
+
+## Learn more
+
+- 📚 [**What is Agent Search Optimization (ASO)?**](https://prowl.world/blog/what-is-agent-search-optimization) — the canonical essay (15 min read)
+- 🗺️ [**Top Agent Discovery Platforms 2026**](https://prowl.world/blog/top-agent-discovery-platforms-2026) — honest listicle
+- 🧬 [**ASO concept hub**](https://prowl.world/aso/guide) — the 8 dimensions explained
+- 🛰️ [**The Agent Web Map**](https://prowl.world/map) — pixel grid of scored APIs
+- 🐦 [**@prowl_world**](https://x.com/prowl_world) — release notes, methodology updates
+- 📨 [agent@prowl.world](mailto:agent@prowl.world) — questions, integrations, press
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+**Good first contributions to consider:**
+- Add a local-LLM provider (Ollama / llama.cpp) — see `src/prowl_bench/llm/providers.py`
+- Add a new benchmark template — see `src/prowl_bench/templates/` and `CONTRIBUTING.md#adding-a-new-template`
+- Improve terminal output formatting — see `src/prowl_bench/output/terminal.py`
+- Add SDK quality scoring (currently only checks presence, not quality)
+- Add an MCP transport variant (currently npm `mcp-prowl` is stdio-only)
+
+If you ship a benchmark adapter for a popular API/service, we'll mention you in the next release notes.
 
 ```bash
 # Clone and install dev dependencies
