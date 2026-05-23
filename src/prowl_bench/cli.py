@@ -700,5 +700,310 @@ def manifest(
         )
 
 
+def _load_inline_spec(source: str) -> tuple[dict, str]:
+    """Load a spec from URL or file path. Returns (parsed_dict, raw_text)."""
+    import httpx
+    from pathlib import Path
+
+    if source.startswith(("http://", "https://")):
+        with httpx.Client(timeout=15.0, follow_redirects=True) as c:
+            r = c.get(source, headers={"Accept": "application/json, application/yaml, */*"})
+            r.raise_for_status()
+            text = r.text
+    else:
+        text = Path(source).read_text(encoding="utf-8")
+    try:
+        return json.loads(text), text
+    except json.JSONDecodeError:
+        try:
+            import yaml  # type: ignore[import-untyped]
+        except ImportError as exc:
+            raise typer.BadParameter(
+                "Spec is not valid JSON and PyYAML is not installed. "
+                "Run: pip install pyyaml"
+            ) from exc
+        out = yaml.safe_load(text)
+        if not isinstance(out, dict):
+            raise typer.BadParameter("Spec must parse to a top-level object")
+        return out, text
+
+
+def _heuristic_review(spec: dict) -> dict:
+    """Pure local, no LLM. Counts ops, picks the first auth scheme, eyeballs
+    the spec for the obvious red flags Prowl's hosted scorer would catch
+    in detail. Returns a small dict the CLI prints as a Table."""
+    methods = ("get", "post", "put", "patch", "delete", "head", "options")
+    op_count = 0
+    deep_response_shapes = 0
+    for item in (spec.get("paths") or {}).values():
+        if not isinstance(item, dict):
+            continue
+        for m in methods:
+            if m in item:
+                op_count += 1
+                responses = (item[m] or {}).get("responses") or {}
+                # Cheap nesting check: any 200 response with 3+ levels of
+                # nested schema properties is flagged as bloat-prone.
+                ok = responses.get("200") or responses.get("default") or {}
+                content = (ok.get("content") or {}).get("application/json") or {}
+                schema = content.get("schema") or {}
+
+                def _depth(node, d=0):
+                    if not isinstance(node, dict) or d > 5:
+                        return d
+                    props = node.get("properties") or {}
+                    return max((_depth(v, d + 1) for v in props.values()), default=d)
+
+                if _depth(schema) >= 3:
+                    deep_response_shapes += 1
+
+    schemes = (spec.get("components") or {}).get("securitySchemes") or {}
+    auth_str = "(none declared)"
+    if schemes:
+        first = next(iter(schemes.values()))
+        if isinstance(first, dict):
+            t = first.get("type")
+            if t == "http":
+                auth_str = f"http {first.get('scheme', '?')}"
+            elif t == "apiKey":
+                auth_str = f"apiKey ({first.get('in', '?')}: {first.get('name', '?')})"
+            elif t == "oauth2":
+                auth_str = f"oauth2 ({', '.join((first.get('flows') or {}).keys()) or 'flow?'})"
+            else:
+                auth_str = str(t)
+
+    servers = spec.get("servers") or []
+    backend = servers[0]["url"] if servers and isinstance(servers[0], dict) else "(none)"
+
+    return {
+        "ops": op_count,
+        "auth": auth_str,
+        "backend": backend,
+        "deep_response_shapes": deep_response_shapes,
+        "title": (spec.get("info") or {}).get("title") or "(untitled)",
+    }
+
+
+@design_app.command()
+def review(
+    source: str = typer.Argument(..., help="OpenAPI 3.x spec: an https:// URL or a local file path."),
+    cloud: bool = typer.Option(
+        False, "--cloud",
+        help="Score via Prowl's hosted multi-LLM endpoint (POST /v1/endpoint/review). "
+             "Falls into the 3/day anon free tier without auth; 10/day with PROWL_VENDOR_JWT.",
+    ),
+    target: str | None = typer.Option(
+        None, "--target", help="Focus the cloud review on one operation: '<METHOD> <path>'.",
+    ),
+    api_base: str | None = typer.Option(
+        None, "--api-base", envvar="PROWL_BASE_URL",
+        help="Override the Prowl API base URL (default: https://prowl.world).",
+    ),
+    vendor_jwt: str | None = typer.Option(
+        None, "--vendor-jwt", envvar="PROWL_VENDOR_JWT",
+        help="Vendor JWT for the logged-in free tier (10/day). From localStorage.prowl_jwt in the dashboard.",
+    ),
+):
+    """Score an OpenAPI spec for agent-readiness.
+
+    \b
+    Local mode (default): pure heuristic — op count, auth shape, response
+      nesting depth. No LLM, no network call. Free, fast, offline.
+    --cloud: send the spec to Prowl's hosted scorer (multi-LLM static
+      review). Returns dimension scores + concrete rewrite suggestions.
+      3 anon reviews/day per IP for free; 10/day with --vendor-jwt.
+
+    Examples:
+        prowl-bench design review stripe.json
+        prowl-bench design review https://api.you/openapi.json --cloud
+        prowl-bench design review spec.yaml --cloud --target "POST /charges"
+    """
+    spec, raw_text = _load_inline_spec(source)
+    summary = _heuristic_review(spec)
+
+    table = Table(title=f"Heuristic review — {summary['title']}", show_header=False)
+    table.add_column(style="cyan")
+    table.add_column()
+    table.add_row("ops", str(summary["ops"]))
+    table.add_row("backend", summary["backend"])
+    table.add_row("auth", summary["auth"])
+    table.add_row("deeply-nested responses", str(summary["deep_response_shapes"]))
+    console.print(table)
+
+    if not cloud:
+        console.print("\n[dim]Pass --cloud for a multi-LLM scorecard ($0.02, 3/day free anon).[/dim]")
+        return
+
+    # Cloud path.
+    import httpx
+    base = (api_base or "https://prowl.world").rstrip("/")
+    headers = {"Content-Type": "application/json"}
+    if vendor_jwt:
+        headers["Authorization"] = f"Bearer {vendor_jwt}"
+    payload: dict = {"spec_inline": raw_text}
+    if target:
+        payload["target_endpoint"] = target
+
+    console.print(f"\n[dim]POST {base}/v1/endpoint/review — multi-LLM scoring, ~3-8s...[/dim]")
+    try:
+        with httpx.Client(timeout=60.0) as c:
+            r = c.post(f"{base}/v1/endpoint/review", headers=headers, json=payload)
+    except httpx.HTTPError as exc:
+        console.print(f"[red]Network error: {exc}[/red]")
+        raise typer.Exit(1)
+    if r.status_code == 402:
+        tier = "logged-in (10/day)" if vendor_jwt else "anonymous (3/day)"
+        challenge = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+        usd = float(challenge.get("accepts", [{}])[0].get("maxAmountRequired", 0)) / 1e6
+        console.print(
+            f"[red]Free tier exhausted ({tier}). Re-run via x402 (${usd:.2f}) or wait until UTC midnight.[/red]"
+        )
+        raise typer.Exit(2)
+    if not r.is_success:
+        try:
+            detail = r.json().get("detail", r.text)
+        except Exception:
+            detail = r.text
+        console.print(f"[red]Review failed (HTTP {r.status_code}): {detail}[/red]")
+        raise typer.Exit(1)
+
+    data = r.json()
+    score_table = Table(title=f"Cloud review · {data.get('tier', '?')} · ${data.get('cost_usd', 0):.2f}")
+    score_table.add_column("dimension", style="cyan")
+    score_table.add_column("score", justify="right")
+    score_table.add_row("[bold]overall[/bold]", f"[bold]{data.get('overall', 0):.1f}/10[/bold]")
+    for k in ("parseability", "auth_simplicity", "error_clarity", "schema_gotchas", "token_bloat"):
+        v = (data.get("dimensions") or {}).get(k)
+        score_table.add_row(k, f"{v:.1f}" if isinstance(v, (int, float)) else "—")
+    console.print(score_table)
+
+    suggestions = data.get("suggestions") or []
+    if suggestions:
+        console.print(f"\n[cyan]Suggestions ({len(suggestions)}):[/cyan]")
+        for i, s in enumerate(suggestions, 1):
+            tag = s.get("tag", "OTHER")
+            op = s.get("op", "")
+            title = s.get("title", "")
+            detail = s.get("detail")
+            savings = s.get("token_savings_pct")
+            console.print(f"  {i}. [yellow]{tag}[/yellow] {op}  [white]{title}[/white]")
+            if detail:
+                console.print(f"     [dim]{detail}[/dim]")
+            if savings:
+                console.print(f"     [green]~{savings:.0f}% token savings[/green]")
+    else:
+        console.print("\n[green]No rewrites flagged — spec reads cleanly to both LLMs.[/green]")
+
+
+@design_app.command()
+def test(
+    target_url: str = typer.Argument(..., help="Live URL to hit (the actual endpoint, e.g. https://api.example.com/v1/items)."),
+    spec: str | None = typer.Option(
+        None, "--spec", help="OpenAPI 3.x spec for context (URL or file path). Required with --cloud.",
+    ),
+    method: str = typer.Option("GET", "--method", "-X", help="HTTP method."),
+    cloud: bool = typer.Option(
+        False, "--cloud",
+        help="Score via Prowl's hosted live-test endpoint (POST /v1/endpoint/test, $0.05). "
+             "No anon free tier — requires --vendor-jwt or x402.",
+    ),
+    api_base: str | None = typer.Option(
+        None, "--api-base", envvar="PROWL_BASE_URL",
+        help="Override the Prowl API base URL (default: https://prowl.world).",
+    ),
+    vendor_jwt: str | None = typer.Option(
+        None, "--vendor-jwt", envvar="PROWL_VENDOR_JWT", help="Vendor JWT for billing.",
+    ),
+):
+    """Hit a URL and (optionally) score the response against its spec.
+
+    \b
+    Local mode (default): one HTTP GET, prints status + latency + size +
+      a short body preview. Free, no LLM, no network call to Prowl.
+    --cloud: send target_url + spec to Prowl's hosted live-test scorer.
+      Multi-LLM compares declared response shape vs. what came back.
+
+    Examples:
+        prowl-bench design test https://api.you/v1/items
+        prowl-bench design test https://api.you/v1/items --spec stripe.json --cloud
+    """
+    import httpx
+    if not method.upper() in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
+        console.print(f"[red]Unsupported method: {method}[/red]")
+        raise typer.Exit(1)
+
+    # Local probe.
+    t0 = time.time()
+    try:
+        with httpx.Client(timeout=15.0, follow_redirects=True) as c:
+            r = c.request(method.upper(), target_url)
+    except httpx.HTTPError as exc:
+        console.print(f"[red]Probe failed: {exc}[/red]")
+        raise typer.Exit(1)
+    dur_ms = int((time.time() - t0) * 1000)
+    body_bytes = len(r.content or b"")
+
+    color = "green" if 200 <= r.status_code < 300 else ("yellow" if 300 <= r.status_code < 500 else "red")
+    table = Table(title=f"Live probe — {method.upper()} {target_url}", show_header=False)
+    table.add_column(style="cyan")
+    table.add_column()
+    table.add_row("status", f"[{color}]{r.status_code} {r.reason_phrase}[/{color}]")
+    table.add_row("latency", f"{dur_ms} ms")
+    table.add_row("size", f"{body_bytes} B")
+    table.add_row("content-type", r.headers.get("content-type", "(none)"))
+    console.print(table)
+
+    preview = (r.text or "")[:400]
+    if preview:
+        console.print(f"\n[dim]body preview ({len(preview)} chars):[/dim]\n{preview}")
+
+    if not cloud:
+        console.print("\n[dim]Pass --cloud --spec <spec> for a multi-LLM scored test ($0.05).[/dim]")
+        return
+
+    if not spec:
+        console.print("[red]--cloud requires --spec (URL or file path of the OpenAPI spec).[/red]")
+        raise typer.Exit(1)
+    _, raw_text = _load_inline_spec(spec)
+
+    base = (api_base or "https://prowl.world").rstrip("/")
+    headers = {"Content-Type": "application/json"}
+    if vendor_jwt:
+        headers["Authorization"] = f"Bearer {vendor_jwt}"
+    payload = {
+        "spec_inline": raw_text,
+        "target_url": target_url,
+        "method": method.upper(),
+    }
+    console.print(f"\n[dim]POST {base}/v1/endpoint/test — multi-LLM scored test, ~4-10s...[/dim]")
+    try:
+        with httpx.Client(timeout=120.0) as c:
+            cr = c.post(f"{base}/v1/endpoint/test", headers=headers, json=payload)
+    except httpx.HTTPError as exc:
+        console.print(f"[red]Network error: {exc}[/red]")
+        raise typer.Exit(1)
+    if cr.status_code == 402:
+        console.print("[red]Live test requires payment — no free tier on /v1/endpoint/test. Pass --vendor-jwt or pay via x402.[/red]")
+        raise typer.Exit(2)
+    if not cr.is_success:
+        try:
+            detail = cr.json().get("detail", cr.text)
+        except Exception:
+            detail = cr.text
+        console.print(f"[red]Test failed (HTTP {cr.status_code}): {detail}[/red]")
+        raise typer.Exit(1)
+
+    data = cr.json()
+    out = Table(title=f"Cloud live-test · ${data.get('cost_usd', 0):.2f}")
+    out.add_column("dimension", style="cyan")
+    out.add_column("score", justify="right")
+    out.add_row("[bold]overall[/bold]", f"[bold]{data.get('overall', 0):.1f}/10[/bold]")
+    for k in ("parseability", "auth_simplicity", "error_clarity", "schema_gotchas", "token_bloat"):
+        v = (data.get("dimensions") or {}).get(k)
+        out.add_row(k, f"{v:.1f}" if isinstance(v, (int, float)) else "—")
+    out.add_row("probe_status", str(data.get("probe_status", "?")))
+    console.print(out)
+
+
 if __name__ == "__main__":
     app()
