@@ -1005,5 +1005,272 @@ def test(
     console.print(out)
 
 
+@design_app.command()
+def run(
+    source: str = typer.Argument(..., help="OpenAPI spec: an https:// URL or a local file path."),
+    target_base_url: str | None = typer.Option(
+        None, "--base-url",
+        help="Override the spec's servers[0].url (required for specs without one).",
+    ),
+    bearer: str | None = typer.Option(
+        None, "--bearer", envvar="PROWL_TARGET_BEARER",
+        help="Bearer token forwarded to the target server for auth.",
+    ),
+    api_key_name: str = typer.Option(
+        "X-API-Key", "--api-key-name",
+        help="Header name for apiKey auth (default X-API-Key).",
+    ),
+    api_key_value: str | None = typer.Option(
+        None, "--api-key", envvar="PROWL_TARGET_API_KEY",
+        help="API key value forwarded to the target server.",
+    ),
+    include_destructive: bool = typer.Option(
+        False, "--destructive",
+        help="Also execute POST/PUT/PATCH/DELETE ops. Default false for safety.",
+    ),
+    max_ops: int = typer.Option(50, "--max-ops", min=1, max=50, help="Hard-capped at 50 server-side."),
+    parallelism: int = typer.Option(5, "--parallelism", min=1, max=10),
+    api_base: str | None = typer.Option(
+        None, "--api-base", envvar="PROWL_BASE_URL",
+        help="Override the Prowl API base URL (default: https://prowl.world).",
+    ),
+    vendor_jwt: str | None = typer.Option(
+        None, "--vendor-jwt", envvar="PROWL_VENDOR_JWT",
+        help="Vendor JWT for the logged-in free tier (10/day).",
+    ),
+    payment_proof: str | None = typer.Option(
+        None, "--payment-proof", envvar="PROWL_PAYMENT_PROOF",
+        help="x402 proof (sol:<sig>) when paying instead of using free tier.",
+    ),
+):
+    """Run a third-party LLM evaluation against your live API.
+
+    \b
+    Smart runner. Reads your spec, classifies every operation
+    (runnable / needs-creds / destructive / unrunnable), executes the
+    safe ones against the real target, an LLM evaluates each
+    endpoint's live behavior, and produces a cross-cutting synthesis
+    with prioritized P0/P1/P2 fixes.
+
+    Streams events live as they happen — same SSE source as
+    design.prowl.world. $0.50 hosted; free 10/day with --vendor-jwt.
+
+    Examples:
+        prowl-bench design run https://api.you/openapi.json --bearer sk_live_abc
+        prowl-bench design run spec.json --base-url https://staging.api.you --destructive
+        prowl-bench design run spec.json --api-key tk_xyz --max-ops 20
+    """
+    asyncio.run(_run_design(
+        source, target_base_url, bearer, api_key_name, api_key_value,
+        include_destructive, max_ops, parallelism,
+        api_base, vendor_jwt, payment_proof,
+    ))
+
+
+async def _run_design(
+    source: str,
+    target_base_url: str | None,
+    bearer: str | None,
+    api_key_name: str,
+    api_key_value: str | None,
+    include_destructive: bool,
+    max_ops: int,
+    parallelism: int,
+    api_base: str | None,
+    vendor_jwt: str | None,
+    payment_proof: str | None,
+) -> None:
+    """Open the SSE stream, parse events, render to terminal."""
+    import httpx
+
+    _spec_obj, raw_text = _load_inline_spec(source)
+    base = (api_base or "https://prowl.world").rstrip("/")
+    url = f"{base}/v1/design/run"
+
+    payload: dict = {"spec_inline": raw_text, "max_ops": max_ops, "parallelism": parallelism}
+    if target_base_url:
+        payload["target_base_url"] = target_base_url
+    if include_destructive:
+        payload["include_destructive"] = True
+    creds: dict = {}
+    if bearer:
+        creds["bearer_token"] = bearer
+    if api_key_value:
+        creds["api_key"] = {"header_name": api_key_name, "value": api_key_value}
+    if creds:
+        payload["credentials"] = creds
+
+    headers = {"Content-Type": "application/json", "Accept": "text/event-stream"}
+    if vendor_jwt:
+        headers["Authorization"] = f"Bearer {vendor_jwt}"
+    if payment_proof:
+        headers["X-Payment-Proof"] = payment_proof
+
+    # State accumulated as events stream in — kept so we can print
+    # a final summary table at the end without re-fetching.
+    state = {
+        "format_detected": None,
+        "ops_count": 0,
+        "buckets": {},
+        "ops_done": 0,
+        "ops_total_runnable": 0,
+        "verdicts": [],
+        "synthesis": {"headline": "", "paragraphs": [], "actions": [], "tags": [], "overall": None},
+        "cost_usd": 0.0,
+    }
+
+    console.print(f"\n[dim]POST {url} (text/event-stream)...[/dim]\n")
+
+    try:
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            async with client.stream("POST", url, headers=headers, json=payload) as resp:
+                if resp.status_code == 402:
+                    tier = "logged-in (10/day)" if vendor_jwt else "anonymous (3/day)"
+                    console.print(
+                        f"[red]Free tier exhausted ({tier}). Pass --payment-proof or wait until UTC midnight.[/red]"
+                    )
+                    raise typer.Exit(2)
+                if not resp.is_success:
+                    body = await resp.aread()
+                    console.print(f"[red]HTTP {resp.status_code}: {body.decode(errors='ignore')[:200]}[/red]")
+                    raise typer.Exit(1)
+
+                event = "message"
+                buf_data = ""
+                async for raw_line in resp.aiter_lines():
+                    if not raw_line:
+                        if event and buf_data:
+                            try:
+                                payload_obj = json.loads(buf_data)
+                            except Exception:
+                                payload_obj = {"_raw": buf_data}
+                            _render_design_event(event, payload_obj, state, console)
+                        event = "message"
+                        buf_data = ""
+                        continue
+                    if raw_line.startswith("event:"):
+                        event = raw_line[6:].strip()
+                    elif raw_line.startswith("data:"):
+                        buf_data += raw_line[5:].strip()
+    except httpx.HTTPError as exc:
+        console.print(f"[red]Network error: {exc}[/red]")
+        raise typer.Exit(1)
+
+
+def _render_design_event(event: str, data: dict, state: dict, c: Console) -> None:
+    """One terminal line (or block) per SSE event. Same UX as the
+    browser landing's Live tab, just in your shell."""
+    if event == "normalize.done":
+        state["format_detected"] = data.get("format_detected")
+        state["ops_count"] = data.get("ops_count", 0)
+        c.print(f"[dim]→[/dim] format: [cyan]{state['format_detected']}[/cyan]  ops: [cyan]{state['ops_count']}[/cyan]")
+    elif event == "inspect.done":
+        b = data.get("buckets") or {}
+        state["buckets"] = b
+        state["ops_total_runnable"] = b.get("runnable_now", 0)
+        c.print(
+            f"[dim]→[/dim] buckets: "
+            f"[green]{b.get('runnable_now',0)} runnable[/green]"
+            + (f"  [yellow]{b.get('needs_creds',0)} need-creds[/yellow]" if b.get('needs_creds') else "")
+            + (f"  [yellow]{b.get('destructive',0)} destructive[/yellow]" if b.get('destructive') else "")
+            + (f"  [dim]{b.get('unrunnable',0)} unrunnable[/dim]" if b.get('unrunnable') else "")
+        )
+        c.print()
+    elif event == "op.start":
+        c.print(f"  [dim]···[/dim] {data.get('op','')}", end="\r")
+    elif event == "op.done":
+        status = data.get("status")
+        lat = data.get("latency_ms", 0)
+        size = data.get("response_bytes", 0)
+        if status is None:
+            color = "red"
+            status_str = "×"
+        elif status < 300:
+            color = "green"
+            status_str = str(status)
+        elif status < 400:
+            color = "white"
+            status_str = str(status)
+        else:
+            color = "red"
+            status_str = str(status)
+        state["ops_done"] += 1
+        c.print(f"  [{color}]{status_str:>3}[/{color}] {data.get('op','')}  [dim]{lat}ms · {size/1024:.1f}KB[/dim]")
+        warns = data.get("schema_warnings") or []
+        if warns:
+            c.print(f"        [yellow]⚠ {'; '.join(warns)}[/yellow]")
+        err = data.get("error")
+        if err:
+            c.print(f"        [red]{err}[/red]")
+    elif event == "op.evaluated":
+        sc = data.get("score") or 0
+        verdict = data.get("verdict_text") or ""
+        tags = [t for t in (data.get("issue_tags") or []) if t and t != "OK"]
+        suggs = data.get("suggestions") or []
+        sc_color = "green" if sc >= 8 else ("yellow" if sc >= 6 else "red")
+        tag_str = "  ".join(f"[{sc_color}]{t}[/{sc_color}]" for t in tags) if tags else ""
+        c.print(f"        [{sc_color}]{sc:.1f}/10[/{sc_color}]  {tag_str}")
+        c.print(f"        [dim italic]{verdict}[/dim italic]")
+        for s in suggs:
+            c.print(f"        [dim]→[/dim] {s}")
+        state["verdicts"].append(data)
+        c.print()
+    elif event == "chain.discovered":
+        keys = list((data.get("values") or {}).keys())
+        c.print(f"  [magenta]⛓ chain discovered {data.get('count', 0)} values:[/magenta] [dim]{', '.join(keys[:6])}{'...' if len(keys)>6 else ''}[/dim]\n")
+    elif event == "chain.retry_planned":
+        ops = data.get("ops") or []
+        via = data.get("via_accumulator") or []
+        c.print(f"  [magenta]⛓ retrying {len(ops)} previously-unrunnable ops via {', '.join(via[:3])}[/magenta]\n")
+    elif event == "execution.done":
+        ran = data.get("ran", 0)
+        ok = data.get("succeeded", 0)
+        fail = data.get("failed", 0)
+        p50 = data.get("p50_latency_ms")
+        p95 = data.get("p95_latency_ms")
+        err_rate = data.get("error_rate", 0.0)
+        c.print()
+        c.print(f"[dim]→[/dim] execution: [green]{ok}[/green]/{ran} ok  [red]{fail}[/red] failed  "
+                f"p50 [cyan]{p50}ms[/cyan]  p95 [cyan]{p95}ms[/cyan]  err [yellow]{err_rate*100:.0f}%[/yellow]")
+        if data.get("chained"):
+            c.print(f"[dim]   chained: {data['chained']} ops ran via response-derived values[/dim]")
+    elif event == "audit.done":
+        c.print(f"[dim]→[/dim] static audit: [cyan]{(data.get('overall') or 0):.1f}/10[/cyan]  "
+                f"{len(data.get('suggestions') or [])} suggestions")
+    elif event == "agent.synthesis.start":
+        c.print()
+        c.print("[bold cyan]── Third-party verdict ──[/bold cyan]")
+    elif event == "agent.synthesis.headline":
+        c.print(f"\n[italic white]{data.get('text','')}[/italic white]\n")
+    elif event == "agent.synthesis.paragraph":
+        c.print(f"  {data.get('text','')}\n")
+    elif event == "agent.synthesis.action":
+        prio = data.get("priority", "P?")
+        op = data.get("op", "")
+        act = data.get("action", "")
+        color = {"P0": "red", "P1": "yellow", "P2": "white"}.get(prio, "white")
+        op_str = f"[dim]({op})[/dim] " if op and op != "(spec-wide)" else ""
+        c.print(f"  [{color}][{prio}][/{color}]  {op_str}{act}")
+        state["synthesis"]["actions"].append(data)
+    elif event == "agent.synthesis.tag":
+        state["synthesis"]["tags"].append(data.get("name", ""))
+    elif event == "agent.synthesis.overall":
+        sc = data.get("score")
+        if sc is not None:
+            color = "green" if sc >= 8 else ("yellow" if sc >= 6 else "red")
+            c.print(f"\n[bold {color}]Overall: {sc:.1f}/10[/bold {color}]")
+            if state["synthesis"]["tags"]:
+                c.print(f"[dim]recurring: {', '.join(state['synthesis']['tags'])}[/dim]")
+    elif event == "agent.summary":
+        # Streaming variant already painted this — only the final
+        # snapshot info (cost, evaluated count) is added here.
+        pass
+    elif event == "persist.done":
+        state["cost_usd"] = data.get("cost_usd", 0.0)
+        c.print(f"\n[dim]review_id: {data.get('review_id','')}  ·  ${data.get('cost_usd',0):.2f}  ·  {data.get('duration_ms',0)}ms[/dim]\n")
+    elif event == "error":
+        c.print(f"\n[red]stream error: {data.get('message','')}[/red]")
+
+
 if __name__ == "__main__":
     app()
