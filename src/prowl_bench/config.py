@@ -9,6 +9,11 @@ class BenchConfig(BaseSettings):
     anthropic_api_key: str = ""
     openai_api_key: str = ""
     google_api_key: str = ""
+    # DeepSeek — OpenAI-compatible Chat Completions endpoint (Bearer auth,
+    # model "deepseek-chat"). Treated as a normal scoring provider when set.
+    deepseek_api_key: str = ""
+    deepseek_base_url: str = "https://api.deepseek.com/v1"
+    deepseek_model: str = "deepseek-chat"
 
     # Prowl submission (optional — only needed for --submit)
     prowl_agent_key: str = ""

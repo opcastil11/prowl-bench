@@ -86,7 +86,7 @@ Requires Python 3.10+. No system dependencies.
 ```bash
 # Set at least one LLM API key
 export ANTHROPIC_API_KEY="sk-ant-..."
-# or OPENAI_API_KEY, or GOOGLE_API_KEY — more keys = more balanced scoring
+# or OPENAI_API_KEY, GOOGLE_API_KEY, or DEEPSEEK_API_KEY — more keys = more balanced scoring
 
 # Benchmark any API
 prowl-bench run https://api.stripe.com
@@ -191,6 +191,7 @@ prowl-bench runs the INTERPRET phase across every available LLM provider and ave
 | Claude | `ANTHROPIC_API_KEY` | Claude Sonnet |
 | GPT-4o | `OPENAI_API_KEY` | GPT-4o |
 | Gemini | `GOOGLE_API_KEY` | Gemini 2.5 Flash |
+| DeepSeek | `DEEPSEEK_API_KEY` | DeepSeek V3 |
 | Claude CLI | *(fallback)* | Uses web subscription |
 
 Set multiple keys for more balanced results:
@@ -199,6 +200,7 @@ Set multiple keys for more balanced results:
 export ANTHROPIC_API_KEY="sk-ant-..."
 export OPENAI_API_KEY="sk-..."
 export GOOGLE_API_KEY="AI..."
+export DEEPSEEK_API_KEY="sk-..."
 ```
 
 With all three, each model scores independently and results are averaged. The JSON output includes per-model breakdowns.
@@ -460,7 +462,7 @@ src/prowl_bench/
 │   └── json_utils.py   # Safe JSON extraction from LLM output
 ├── llm/
 │   ├── router.py       # Multi-provider LLM router
-│   ├── providers.py    # Claude, GPT-4o, Gemini, CLI fallback
+│   ├── providers.py    # Claude, GPT-4o, Gemini, DeepSeek, CLI fallback
 │   └── prompts.py      # System prompts for each phase
 ├── output/
 │   ├── terminal.py     # Rich terminal rendering

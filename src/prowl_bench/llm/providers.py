@@ -1,4 +1,4 @@
-"""LLM provider clients — Claude, OpenAI, Gemini, Claude CLI fallback."""
+"""LLM provider clients — Claude, OpenAI, Gemini, DeepSeek, Claude CLI fallback."""
 from __future__ import annotations
 
 import httpx
@@ -15,6 +15,7 @@ LLM_PROVIDERS = {
     "claude": {"model": CLAUDE_MODEL, "label": "Claude Sonnet 4"},
     "openai": {"model": OPENAI_MODEL, "label": "GPT-4o"},
     "gemini": {"model": GEMINI_MODEL, "label": "Gemini 2.5 Flash"},
+    "deepseek": {"model": "deepseek-chat", "label": "DeepSeek V3"},
 }
 
 
@@ -77,6 +78,29 @@ async def call_openai_api(system_prompt: str, user_message: str, max_tokens: int
             headers={"Authorization": f"Bearer {cfg.openai_api_key}", "Content-Type": "application/json"},
             json={
                 "model": OPENAI_MODEL, "max_tokens": max_tokens,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message},
+                ],
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data["choices"][0]["message"]["content"]
+
+
+async def call_deepseek_api(system_prompt: str, user_message: str, max_tokens: int = 4096) -> str:
+    """Call DeepSeek — OpenAI-compatible Chat Completions shape."""
+    cfg = get_config()
+    if not cfg.deepseek_api_key:
+        raise RuntimeError("DEEPSEEK_API_KEY not set")
+
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        resp = await client.post(
+            f"{cfg.deepseek_base_url.rstrip('/')}/chat/completions",
+            headers={"Authorization": f"Bearer {cfg.deepseek_api_key}", "Content-Type": "application/json"},
+            json={
+                "model": cfg.deepseek_model, "max_tokens": max_tokens,
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message},
