@@ -104,6 +104,9 @@ prowl-bench run https://api.example.com --output json > results.json
 
 # CI mode: exit 1 if score below threshold
 prowl-bench run https://api.example.com --min-score 70
+
+# Got an MCP server? This one needs no LLM key at all.
+prowl-bench mcp https://mcp.example.com/mcp
 ```
 
 ## How It Works
@@ -150,7 +153,7 @@ prowl-bench runs a 4-phase pipeline. Each phase is driven by an LLM that reads r
 |---|---|---|---|
 | `api_benchmark` | Required | Has OpenAPI spec or benchmark guide | REST APIs, LLM providers |
 | `platform_profile` | No | No API indicators found | SaaS platforms, web tools |
-| `mcp_compliance` | No | Has MCP manifest URL | MCP servers |
+| `mcp_compliance` | No | URL looks like an MCP endpoint, or category `mcp` | MCP servers |
 | `docs_quality` | No | Has API docs URL only | Documentation audits |
 | `defi_yield` | Required | Categories: defi, staking, yield | DeFi protocols |
 | `crypto_app` | Required | Categories: crypto, exchange, wallet | Exchanges, wallets |
@@ -162,6 +165,68 @@ prowl-bench templates
 # Force a specific template
 prowl-bench run https://example.com --template platform_profile
 ```
+
+## MCP servers — `prowl-bench mcp`
+
+Scores an MCP server's agent-readiness **without an LLM key**. It handshakes
+(`initialize` → `notifications/initialized` → `tools/list`) and grades what can
+be counted: input schemas, tool descriptions, per-property docs, handshake
+latency, and whether the server sends `instructions`.
+
+```bash
+prowl-bench mcp https://mcp.example.com/mcp
+prowl-bench mcp https://mcp.example.com --tools        # list every tool
+prowl-bench mcp https://mcp.example.com -o json        # machine-readable
+prowl-bench mcp https://mcp.example.com --min-score 70 # CI gate
+```
+
+```
+MCP conformance — https://mcp.aarna.ai
+
+   x https://mcp.aarna.ai (http 405)
+  -> https://mcp.aarna.ai/mcp (http 200)
+
+  Crypto Technical Features v1.27.0  https://mcp.aarna.ai/mcp
+  protocol 2025-06-18 · sse framing · stateless · 975ms
+
+  Score: 93/100
+
+  reachability          ##########    10.0/10
+  tool discovery        ##########    10.0/10
+  tool documentation    ##########    10.0/10
+  schema quality        #######...     7.0/10
+  latency               #########.     9.1/10
+  agent guidance        ##########    10.0/10
+
+  Tools: 18 · 18 documented · 18 with a schema
+
+  Findings
+    medium   40 of 40 schema properties have no description
+             Per-property descriptions are what stop an agent passing a
+             plausible value in the wrong format.
+```
+
+Three things worth knowing:
+
+- **The URL you pass is tried first**, then `/mcp`, `/mcp/`, `/api/mcp`, `/sse`.
+  Passing your actual endpoint used to be the one input that failed.
+- **Both response framings are read.** streamable-http lets a server answer a
+  POST with `application/json` *or* `text/event-stream`; a client that reads
+  only one is broken against half the network.
+- **It never calls a tool.** `tools/call` has side effects that belong to
+  whoever runs the server. So this tells you whether an agent has enough
+  information to use your tools — not whether they work.
+
+The score is deterministic, so it is diffable in CI. Exits non-zero if the
+server is unreachable, or if `--min-score` is not met. Use `prowl-bench run`
+when you want an LLM's judgement instead of arithmetic.
+
+`mcp` and `run` will not print the same number for the same server, and that is
+not a bug: they are different scales. `mcp` grades the six things a handshake can
+measure. `run` maps those onto the [8 agent-efficiency dimensions](#scoring) and
+applies the 85 cap for the operational ones a read-only probe cannot observe. Use
+`mcp` to track your own server over time; use `run` to compare against everything
+else in the Prowl catalog.
 
 ## Scoring
 
@@ -181,6 +246,16 @@ prowl-bench run https://example.com --template platform_profile
 Each dimension is scored **0-10**, then weighted to produce an **overall score of 0-100**.
 
 Token efficiency and first-try success carry the most weight because they directly impact agent cost and reliability.
+
+**Unmeasured dimensions are skipped, not scored 0.** Not every template can observe
+all eight — `mcp_compliance` deliberately never calls a tool, so it has nothing to say
+about `error_clarity` or `consistency`. Scoring those 0 would report "we tested this and
+it was terrible" about something nobody tested. The average is taken over the weight
+actually present, and the breakdown lists only what was measured. Leaving a dimension
+blank still isn't free: a run missing `latency` or `consistency` is capped at **85**, so
+a template can't reach 100 by reporting only the dimensions it does well on. This matches
+`compute_score` in the Prowl backend, so a number from this CLI means the same thing as a
+number from prowl.world.
 
 ## Multi-LLM Scoring
 

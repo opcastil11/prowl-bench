@@ -194,6 +194,124 @@ def templates():
         console.print()
 
 
+@app.command("mcp")
+def mcp_check(
+    url: str = typer.Argument(help="MCP server URL (the endpoint itself, or a base URL to search)"),
+    output: str = typer.Option("terminal", "--output", "-o", help="Output format: terminal, json"),
+    min_score: int | None = typer.Option(None, "--min-score", help="Exit non-zero if score below threshold (CI mode)"),
+    timeout: float = typer.Option(20.0, "--timeout", help="Per-request timeout in seconds"),
+    show_tools: bool = typer.Option(False, "--tools", help="List every discovered tool"),
+):
+    """Score an MCP server's agent-readiness. No LLM key required.
+
+    Handshakes, lists tools, and grades what can be counted: schemas,
+    descriptions, per-property docs, latency, `instructions`. Read-only — it
+    never calls a tool, because `tools/call` has side effects that belong to
+    whoever runs the server.
+
+    The score is deterministic, so it is diffable in CI. Run
+    `prowl-bench run` when you want the LLM's judgement instead.
+    """
+    asyncio.run(_mcp_check(url, output, min_score, timeout, show_tools))
+
+
+async def _mcp_check(
+    url: str, output: str, min_score: int | None, timeout: float, show_tools: bool
+):
+    from prowl_bench.mcp import resolve_endpoint, score_probe
+
+    started = time.time()
+    if output != "json":
+        console.print(f"\n[bold]MCP conformance[/bold] — {url}\n")
+
+    probe, attempts = await resolve_endpoint(url, timeout=timeout)
+    report = score_probe(probe, attempts)
+
+    if output == "json":
+        print(json.dumps(report.as_dict(), indent=2))
+    else:
+        _print_mcp_report(report, probe, attempts, show_tools, time.time() - started)
+
+    if min_score is not None and report.overall < min_score:
+        console.print(
+            f"[red]Score {report.overall} is below the --min-score threshold of {min_score}[/red]"
+        )
+        raise typer.Exit(1)
+    if not report.reachable:
+        raise typer.Exit(1)
+
+
+def _print_mcp_report(report, probe, attempts, show_tools: bool, elapsed: float):
+    # Resolution first: if we ended up somewhere other than where the caller
+    # pointed us, that is the single most useful line in the output. Each line
+    # carries the status code only — the full body excerpt is the same on every
+    # failed guess, so repeating it five times buries the one that matters.
+    if len(attempts) > 1:
+        for attempt in attempts:
+            hit = attempt.ok or attempt.status == "auth_required"
+            mark = "[green]->[/green]" if hit else "[dim] x[/dim]"
+            detail = f"http {attempt.http_status}" if attempt.http_status else (
+                (attempt.error or "no answer").split(":")[-1].strip()[:60]
+            )
+            console.print(f"  {mark} {attempt.endpoint} [dim]({detail})[/dim]")
+        console.print()
+
+    if not report.reachable:
+        console.print(f"[red]No MCP server answered at {report.endpoint}[/red]")
+        console.print(f"[dim]{probe.error}[/dim]\n")
+        for f in report.findings:
+            if f.fix:
+                console.print(f"  [dim]{f.fix}[/dim]")
+        console.print()
+        return
+
+    server = report.server_name or "unnamed"
+    version = f" v{report.server_version}" if report.server_version else ""
+    console.print(f"  [bold]{server}{version}[/bold]  [dim]{report.endpoint}[/dim]")
+    console.print(
+        f"  [dim]protocol {report.protocol_version or '?'} · {report.framing} framing · "
+        f"{'stateful' if report.stateful else 'stateless'} · {report.latency_ms}ms[/dim]\n"
+    )
+
+    color = "green" if report.overall >= 70 else "yellow" if report.overall >= 40 else "red"
+    console.print(f"  Score: [{color}][bold]{report.overall}[/bold]/100[/{color}]\n")
+
+    table = Table(show_header=False, box=None, padding=(0, 2, 0, 2))
+    for dim, value in report.dimensions.items():
+        bar = "#" * int(value) + "." * (10 - int(value))
+        table.add_row(dim.replace("_", " "), f"[dim]{bar}[/dim]", f"{value:.1f}/10")
+    console.print(table)
+
+    console.print(
+        f"\n  Tools: [bold]{report.tool_count}[/bold] · "
+        f"{report.documented_tools} documented · {report.schema_tools} with a schema"
+    )
+
+    if show_tools and probe.tools:
+        console.print()
+        for tool in probe.tools:
+            props = (tool.input_schema or {}).get("properties") or {}
+            flags = []
+            if not tool.input_schema:
+                flags.append("[red]no schema[/red]")
+            if not (tool.description or "").strip():
+                flags.append("[red]no description[/red]")
+            suffix = f"  {' '.join(flags)}" if flags else ""
+            console.print(f"    [bold]{tool.name}[/bold] [dim]({len(props)} args)[/dim]{suffix}")
+            if tool.description:
+                console.print(f"      [dim]{tool.description.strip()[:110]}[/dim]")
+
+    if report.findings:
+        console.print("\n  [bold]Findings[/bold]")
+        for f in report.findings:
+            sev_color = {"critical": "red", "high": "red", "medium": "yellow"}.get(f.severity, "dim")
+            console.print(f"    [{sev_color}]{f.severity:<8}[/{sev_color}] {f.detail}")
+            if f.fix:
+                console.print(f"             [dim]{f.fix}[/dim]")
+
+    console.print(f"\n  [dim]{elapsed:.1f}s · no LLM used[/dim]\n")
+
+
 @app.command()
 def register(
     name: str = typer.Option("prowl-bench-runner", help="Agent name"),

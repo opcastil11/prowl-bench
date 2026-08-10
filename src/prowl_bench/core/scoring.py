@@ -17,15 +17,38 @@ WEIGHTS = {
 def compute_score(dimensions: dict[str, float]) -> tuple[int, dict[str, int]]:
     """Compute overall score (0-100) from dimension scores (0-10 each).
 
-    Returns (overall_score, breakdown_dict).
+    A dimension that was never measured is **skipped**, not scored 0, and the
+    average is renormalised over the weight actually present. Scoring it 0 says
+    "we tested this and it was terrible" about something nobody tested — an
+    mcp_compliance run, which cannot observe `error_clarity` or `consistency`
+    without calling somebody's tools, lost 16 points to that lie.
+
+    Not measuring is still not free: missing `latency` or `consistency` caps the
+    result at 85, so a template can't reach 100 by reporting only the dimensions
+    it happens to do well on. Mirrors `compute_score` in the Prowl backend, so a
+    number from this CLI means the same thing as a number from prowl.world.
+
+    Returns (overall_score, breakdown_dict). The breakdown carries only the
+    dimensions that were measured.
     """
-    breakdown = {}
+    breakdown: dict[str, int] = {}
     total = 0.0
+    total_weight = 0.0
     for dim, weight in WEIGHTS.items():
-        raw = dimensions.get(dim, 0.0)
+        raw = dimensions.get(dim)
+        if raw is None:
+            continue
         clamped = max(0.0, min(10.0, raw))
         breakdown[dim] = round(clamped)
         total += clamped * weight
+        total_weight += weight
 
-    overall = round(total * 10)  # scale 0-10 weighted avg -> 0-100
+    if total_weight <= 0:
+        return 0, breakdown
+
+    overall = round((total / total_weight) * 10)
+
+    if "latency" not in breakdown or "consistency" not in breakdown:
+        overall = min(overall, 85)
+
     return min(100, max(0, overall)), breakdown

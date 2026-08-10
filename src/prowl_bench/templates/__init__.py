@@ -34,6 +34,43 @@ def get_all_templates() -> list[TemplateConfig]:
     return [t.config for t in TEMPLATE_REGISTRY.values()]
 
 
+def looks_like_mcp(url: str, spec_content: str | None = None) -> bool:
+    """Cheap, offline guess at whether a target is an MCP server.
+
+    Detection runs before any network call, so this reads the URL and whatever
+    spec text we already have — never a probe. It is deliberately narrow: a
+    false positive costs a wasted handshake, but a false *negative* is how the
+    `mcp_compliance` template ended up unreachable (`has_mcp` was hardcoded to
+    False, so `prowl-bench run <mcp-url>` scored MCP servers as web platforms).
+
+    `mcp` must appear as a path/host segment, not merely as a substring — the
+    literal check would match `.../simcpanel` and, worse, any docs page that
+    happens to spell it.
+    """
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url if "://" in url else f"https://{url}")
+    host_labels = (parsed.hostname or "").split(".")
+    path_segments = [s for s in parsed.path.split("/") if s]
+
+    if "mcp" in host_labels:
+        return True
+    for segment in path_segments:
+        # `mcp`, `mcp-commercial`, `mcp_v2` — a segment that starts with the
+        # token. `simcpanel` does not.
+        if segment.lower() == "mcp" or segment.lower().startswith(("mcp-", "mcp_", "mcp.")):
+            return True
+
+    if spec_content:
+        head = spec_content[:4000].lower()
+        if "modelcontextprotocol" in head:
+            return True
+        # A manifest naming its own transport, rather than prose mentioning MCP.
+        if '"tools/list"' in head or "streamable-http" in head:
+            return True
+    return False
+
+
 def detect_template_from_metadata(
     categories: list[str],
     has_openapi: bool = False,
@@ -41,6 +78,9 @@ def detect_template_from_metadata(
 ) -> str:
     """Auto-detect template from service metadata (no DB dependency)."""
     cats = set(c.lower() for c in categories)
+
+    if "mcp" in cats:
+        has_mcp = True
 
     if has_mcp:
         return "mcp_compliance"

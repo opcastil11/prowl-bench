@@ -375,15 +375,18 @@ async def run_benchmark(
 
     This is the main entry point for the OSS runner.
     """
-    from prowl_bench.templates import detect_template_from_metadata, get_template
+    from prowl_bench.templates import (
+        detect_template_from_metadata, get_template, looks_like_mcp,
+    )
 
     started_at = datetime.now(timezone.utc).isoformat()
 
-    # Auto-detect template
+    # Auto-detect template. `has_mcp` used to be hardcoded False, which made the
+    # mcp_compliance branch unreachable without an explicit `-t`.
     slug = template_slug or detect_template_from_metadata(
         categories=categories or [],
         has_openapi=bool(spec_content and "openapi" in spec_content.lower()[:500]),
-        has_mcp=False,
+        has_mcp=looks_like_mcp(url, spec_content),
     )
     template = get_template(slug)
 
