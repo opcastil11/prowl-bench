@@ -8,8 +8,7 @@
 
 Evaluate any API across 8 dimensions of agent-readiness using multi-LLM scoring.
 
-[![PyPI version](https://img.shields.io/pypi/v/prowl-bench?color=%2334D058&label=pypi)](https://pypi.org/project/prowl-bench/)
-[![Python](https://img.shields.io/pypi/pyversions/prowl-bench?color=%2334D058)](https://pypi.org/project/prowl-bench/)
+[![Python](https://img.shields.io/badge/python-3.10%2B-%2334D058)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/github/license/opcastil11/prowl-bench?color=%2334D058)](https://github.com/opcastil11/prowl-bench/blob/main/LICENSE)
 [![Tests](https://img.shields.io/github/actions/workflow/status/opcastil11/prowl-bench/ci.yml?label=tests&color=%2334D058)](https://github.com/opcastil11/prowl-bench/actions)
 
@@ -75,8 +74,10 @@ $ prowl-bench run https://api.stripe.com
 
 ## Installation
 
+Install from source (not published to PyPI yet):
+
 ```bash
-pip install prowl-bench
+pip install "git+https://github.com/opcastil11/prowl-bench.git"
 ```
 
 Requires Python 3.10+. No system dependencies.
@@ -337,7 +338,7 @@ jobs:
         with:
           python-version: '3.12'
 
-      - run: pip install prowl-bench
+      - run: pip install "git+https://github.com/opcastil11/prowl-bench.git"
 
       - name: Run benchmark
         env:
