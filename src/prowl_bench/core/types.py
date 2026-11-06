@@ -19,6 +19,7 @@ class ServiceAnalysis:
     rate_limits: dict
     capabilities: list[str]
     raw_analysis: str
+    declared_spec: dict | None = None  # parsed OpenAPI, when the spec is one
 
 
 @dataclass

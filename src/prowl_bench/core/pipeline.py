@@ -22,6 +22,7 @@ from prowl_bench.llm.prompts import (
 )
 from prowl_bench.sandbox.url_validator import validate_url, SandboxViolation
 from prowl_bench.sandbox.payload_validator import validate_payload, validate_headers
+from prowl_bench.core.spec_digest import spec_digest
 from prowl_bench.sandbox.prompt_sanitizer import sanitize_prompt_input
 
 import logging
@@ -41,9 +42,9 @@ async def analyze_service(
 ) -> ServiceAnalysis:
     """Have the LLM analyze an API spec and extract structured data."""
     service_name = sanitize_prompt_input(service_name)
-    spec_content = sanitize_prompt_input(spec_content)
+    spec_content = sanitize_prompt_input(spec_digest(spec_content, 15000), max_len=15000)
     if docs_content:
-        docs_content = sanitize_prompt_input(docs_content)
+        docs_content = sanitize_prompt_input(docs_content, max_len=10000)
 
     user_msg = f"Service: {service_name}\n\n"
     if benchmark_guide:
@@ -76,7 +77,8 @@ async def analyze_service(
 
 async def plan_benchmark(analysis: ServiceAnalysis) -> BenchmarkPlan:
     """Have the LLM plan the benchmark based on the analysis."""
-    user_msg = f"## Service Analysis\n```json\n{json.dumps(analysis.__dict__, default=str)}\n```"
+    fields = {k: v for k, v in analysis.__dict__.items() if k != "declared_spec"}
+    user_msg = f"## Service Analysis\n```json\n{json.dumps(fields, default=str)}\n```"
     raw_response = await call_llm(PLAN_SYSTEM, user_msg, max_tokens=4096)
     parsed = extract_json(raw_response)
 

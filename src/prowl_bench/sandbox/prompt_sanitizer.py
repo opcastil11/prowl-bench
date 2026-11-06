@@ -19,7 +19,7 @@ INJECTION_PATTERNS = [
 MAX_INPUT_LENGTH = 5000
 
 
-def sanitize_prompt_input(text: str) -> str:
+def sanitize_prompt_input(text: str, max_len: int = MAX_INPUT_LENGTH) -> str:
     """Strip prompt injection patterns from user-supplied text."""
     if not text:
         return text
@@ -31,8 +31,8 @@ def sanitize_prompt_input(text: str) -> str:
             log.warning("Prompt injection pattern stripped: %s", match.group())
             cleaned = pattern.sub("[BLOCKED]", cleaned)
 
-    if len(cleaned) > MAX_INPUT_LENGTH:
-        log.warning("Input truncated from %d to %d chars", len(cleaned), MAX_INPUT_LENGTH)
-        cleaned = cleaned[:MAX_INPUT_LENGTH]
+    if len(cleaned) > max_len:
+        log.warning("Input truncated from %d to %d chars", len(cleaned), max_len)
+        cleaned = cleaned[:max_len]
 
     return cleaned

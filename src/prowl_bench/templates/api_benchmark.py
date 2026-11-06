@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from prowl_bench.templates.base import BaseBenchmarkTemplate, TemplateConfig
 from prowl_bench.core.types import ServiceAnalysis, BenchmarkPlan, BenchmarkExecutionResult, NormalizedScore
+from prowl_bench.core.spec_digest import align_plan, declared_base_url, parse_spec
 from prowl_bench.core.pipeline import (
     analyze_service, plan_benchmark, execute_benchmark, interpret_results_multi,
 )
@@ -20,10 +21,19 @@ class ApiBenchmarkTemplate(BaseBenchmarkTemplate):
     )
 
     async def analyze(self, url, name, spec_content, docs_content):
-        return await analyze_service(spec_content, name, docs_content)
+        analysis = await analyze_service(spec_content, name, docs_content)
+        analysis.declared_spec = parse_spec(spec_content)
+        return analysis
 
     async def plan(self, analysis):
-        return await plan_benchmark(analysis)
+        # The spec's server and paths outrank what the model wrote down.
+        spec = analysis.declared_spec
+        if spec:
+            analysis.base_url = declared_base_url(spec, analysis.base_url) or analysis.base_url
+        plan = await plan_benchmark(analysis)
+        if spec:
+            align_plan(plan.tests, spec, analysis.base_url)
+        return plan
 
     async def execute(self, plan, analysis, raw_credential):
         return await execute_benchmark(plan, analysis, raw_credential)
